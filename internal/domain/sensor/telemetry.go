@@ -1,4 +1,4 @@
-package domain
+package sensor
 
 type Telemetry struct {
 	EventID       string `json:"event_id"`       // ID único do evento de telemetria
