@@ -9,7 +9,7 @@ import (
 	"math/rand"
 	"time"
 
-	"ormuz-ledger/internal/domain"
+	"ormuz-ledger/internal/domain/sensor"
 	"github.com/google/uuid"
 )
 
@@ -22,7 +22,7 @@ type Engine struct {
 }
 
 // Start inicia o loop gerando dados multiplexados e enviando pelo canal
-func (e *Engine) Start(ctx context.Context, out chan<- domain.Telemetry) {
+func (e *Engine) Start(ctx context.Context, out chan<- sensor.Telemetry) {
 
 	ticker := time.NewTicker(e.Frequency)
 	defer ticker.Stop()
@@ -38,7 +38,7 @@ func (e *Engine) Start(ctx context.Context, out chan<- domain.Telemetry) {
 	}
 }
 
-func (e *Engine) fire(out chan<- domain.Telemetry) {
+func (e *Engine) fire(out chan<- sensor.Telemetry) {
 	isThreat := rand.Float64() < e.ThreatProbability
 	isCritical := false
 	eventID := "N/A"
@@ -63,7 +63,7 @@ func (e *Engine) fire(out chan<- domain.Telemetry) {
 		signature = hex.EncodeToString(hash[:])
 	}
 
-	payload := domain.NewTelemetry(eventID, sensorID, sectorID, isThreat, isCritical, nationID, signature)
+	payload := sensor.NewTelemetry(eventID, sensorID, sectorID, isThreat, isCritical, nationID, signature)
 
 	// Backpressure
 	select {
