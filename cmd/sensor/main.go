@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"ormuz-ledger/internal/domain"
+	"ormuz-ledger/internal/domain/sensor"
 	"github.com/joho/godotenv"
 
 	generator "ormuz-ledger/internal/sensor"
@@ -107,7 +107,7 @@ func main() {
 	log.Printf("[BOOT] Parâmetros: %d Setores | Freq: %dms | Nações: %v", totalSectors, freqMs, nations)
 
 	// 4. Inicialização do Motor
-	telemetryChan := make(chan domain.Telemetry, 500)
+	telemetryChan := make(chan sensor.Telemetry, 500)
 
 	engine := &generator.Engine{
 		TotalSectors:        totalSectors,
