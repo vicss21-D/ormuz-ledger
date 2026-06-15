@@ -6,17 +6,15 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
-	"ormuz-ledger/internal/inventory"
+	cache "ormuz-ledger/internal/inventory"
 	"ormuz-ledger/pkg/queue"
 	"ormuz-ledger/pkg/radar"
 )
 
 func main() {
 	// 1. Configurações de Ambiente
-	sectorsCount, _ := strconv.Atoi(getEnv("TOTAL_SECTORS", "25"))
 	udpPort := getEnv("UDP_PORT", "9000")
 	httpPort := getEnv("HTTP_PORT", "8080")
 	cometURL := getEnv("COMET_URL", "http://tasks.cometbft:26657")
@@ -26,14 +24,16 @@ func main() {
 	shadowBuffer := NewShadowBufferManager()
 	inFlight := radar.NewInFlightManager(missionQueue)
 	idempotency := cache.NewIdempotencyFilter(60 * time.Second)
-	
-	router := NewSectorRouter(sectorsCount, "tasks.broker")
+	unverified := NewUnverifiedBufferManager()
+
+	router := NewSectorRouter(25, "tasks.broker")
 	ledgerClient := NewLedgerClient(cometURL)
 
 	// 3. Montagem do Processador de Missões
 	processor := &MissionProcessor{
 		Queue:        missionQueue,
 		ShadowBuffer: shadowBuffer,
+		Unverified:   unverified,
 		Ledger:       ledgerClient,
 		Filter:       idempotency,
 		Router:       router,
@@ -46,7 +46,7 @@ func main() {
 	})
 
 	// 5. Início do Servidor HTTP (C2 e Drones)
-	httpServer := NewHTTPServer(missionQueue, inFlight, shadowBuffer)
+	httpServer := NewHTTPServer(missionQueue, inFlight, shadowBuffer, unverified, idempotency)
 	go func() {
 		log.Printf("🌐 Servidor HTTP (C2) escutando na porta %s...", httpPort)
 		if err := http.ListenAndServe(":"+httpPort, httpServer.SetupRouter()); err != nil {
@@ -77,7 +77,7 @@ func startUDPIngestion(port string, outChan chan<- []byte) {
 		if err != nil {
 			continue
 		}
-		
+
 		packetCopy := make([]byte, n)
 		copy(packetCopy, buffer[:n])
 
