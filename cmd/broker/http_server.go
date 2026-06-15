@@ -11,6 +11,7 @@ import (
 	"ormuz-ledger/pkg/radar"
 	"ormuz-ledger/pkg/server"
 	"ormuz-ledger/internal/inventory"
+	"ormuz-ledger/pkg/model"
 )
 
 // HTTPServer gerencia a API HTTP do Broker para C2 e Drones
@@ -51,7 +52,7 @@ func (hs *HTTPServer) SetupRouter() *http.ServeMux {
 	mux.HandleFunc("/api/mission/renew", hs.missionRenew)
 
 	// ========== INTERNAL API (BROKER <-> BROKER GOSSIP) ==========
-	mux.HandleFunc("/internal/shadow/sync", hs.shadowSync)
+	mux.HandleFunc("/internal/shadow/sync", hs.HandleShadowSync)
 	mux.HandleFunc("/internal/topology/sync", hs.topologySync)
 
 	return mux
@@ -254,19 +255,21 @@ func (s *HTTPServer) HandleShadowSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.Filter.CheckAndAdd(eventID)
+
 	switch payload.Action {
 	case "ACK":
 		// 2. Removemos da sala de espera (se o pacote UDP já tiver chegado)
-		s.UnverifiedBuffer.RetrieveAndRemove(eventID)
+		s.Unverified.RetrieveAndRemove(eventID)
 		
 		// 3. INCONDICIONAL: Se o Primário validou, a missão é garantida. 
 		// Colocamos no Backup Oficial imediatamente!
-		s.ShadowBuffer.StoreOrphanedMission(payload.Mission)
+		s.ShadowBuffer.Store(payload.Mission)
 		log.Printf("[GOSSIP] Missão %s PROMOVIDA para o Shadow Buffer.", eventID[:8])
 
 	case "NACK":
 		// Primário rejeitou a cobrança. Limpamos a memória.
-		if _, found := s.UnverifiedBuffer.RetrieveAndRemove(eventID); found {
+		if _, found := s.Unverified.RetrieveAndRemove(eventID); found {
 			log.Printf("[GOSSIP] Missão %s DESCARTADA (Rejeição Ledger).", eventID[:8])
 		}
 	}

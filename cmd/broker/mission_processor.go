@@ -86,6 +86,7 @@ func (p *MissionProcessor) broadcastValidationSync(action string, mission model.
 	payload := map[string]interface{}{
 		"action":  action,
 		"mission": mission,
+		"event_id": mission.Payload.EventID,
 	}
 	jsonData, _ := json.Marshal(payload)
 	client := &http.Client{Timeout: 2 * time.Second}
