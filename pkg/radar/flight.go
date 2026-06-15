@@ -4,13 +4,13 @@ import (
 	"sync"
 	"time"
 
-	"strait-of-ormuz/pkg/queue"
-	"strait-of-ormuz/pkg/model"
+	"ormuz-ledger/pkg/queue"
+	"ormuz-ledger/pkg/model"
 )
 
 // InFlightRecord guarda a missão e o momento exato em que o contrato (Lease) dela acaba
 type InFlightRecord struct {
-	Mission   models.Mission
+	Mission   model.Mission
 	ExpiresAt time.Time
 }
 

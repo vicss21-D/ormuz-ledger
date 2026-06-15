@@ -3,8 +3,8 @@ package server
 import (
 	"time"
 	
-	"strait-of-ormuz/pkg/model"
-	"strait-of-ormuz/pkg/routing"
+	"ormuz-ledger/pkg/model"
+	"ormuz-ledger/pkg/routing"
 )
 
 // =========================================================
@@ -26,7 +26,7 @@ type TelemetryRequest struct {
 
 // DispatchMissionRequest: Estação envia a missão e sua própria localização para o Drone
 type DispatchMissionRequest struct {
-	Mission       models.Mission     `json:"mission"`
+	Mission       model.Mission     `json:"mission"`
 	StationAnchor routing.Coordinate  `json:"station_anchor"` // Usado pelo Drone para calcular o tempo de voo
 }
 

@@ -6,13 +6,13 @@ import (
 	"time"
 	"log"
 
-	"strait-of-ormuz/pkg/clock"
-	"strait-of-ormuz/pkg/model"
+	"ormuz-ledger/pkg/clock"
+	"ormuz-ledger/pkg/model"
 )
 
 // --- ESTRUTURA INTERNA DA HEAP ---
 
-type missionHeap []models.Mission
+type missionHeap []model.Mission
 
 func (h missionHeap) Len() int      { return len(h) }
 func (h missionHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
@@ -34,7 +34,7 @@ func (h missionHeap) Less(i, j int) bool {
 }
 
 func (h *missionHeap) Push(x interface{}) {
-	*h = append(*h, x.(models.Mission))
+	*h = append(*h, x.(model.Mission))
 }
 
 func (h *missionHeap) Pop() interface{} {
@@ -68,7 +68,7 @@ func New(agingLimit uint64) *PriorityQueue {
 }
 
 // Enqueue enfileira uma nova missão logaritmicamente O(log N)
-func (pq *PriorityQueue) Enqueue(m models.Mission) {
+func (pq *PriorityQueue) Enqueue(m model.Mission) {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
 	
@@ -78,16 +78,16 @@ func (pq *PriorityQueue) Enqueue(m models.Mission) {
 // Dequeue tenta retirar a missão de maior prioridade da Heap.
 // Retorna a missão e 'true' se houver sucesso.
 // Se a fila estiver vazia, retorna 'false' imediatamente (Não-bloqueante).
-func (pq *PriorityQueue) Dequeue() (models.Mission, bool) {
+func (pq *PriorityQueue) Dequeue() (model.Mission, bool) {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
 
 	// Se estiver vazia, não dorme. Apenas avisa quem chamou que não há nada.
 	if pq.mh.Len() == 0 {
-		return models.Mission{}, false
+		return model.Mission{}, false
 	}
 
-	mission := heap.Pop(pq.mh).(models.Mission)
+	mission := heap.Pop(pq.mh).(model.Mission)
 	return mission, true
 }
 

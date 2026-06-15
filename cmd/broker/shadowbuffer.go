@@ -27,7 +27,7 @@ func (sb *ShadowBufferManager) RescueOrphanedMissions() {
 
 		currentOwner := getOwnerIP(mission.Payload.SectorID)
 
-		// Se agora somos o dono, move para heap
+		// Se for responsável do setor, move para heap
 		if isLocalIP(currentOwner) {
 			missionQueue.Enqueue(mission)
 			sb.Buffer.Delete(key)

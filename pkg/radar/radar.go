@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	"strait-of-ormuz/pkg/model"
-	"strait-of-ormuz/pkg/queue"
+	"ormuz-ledger/pkg/model"
+	"ormuz-ledger/pkg/queue"
 )
 
 // NewInFlightManager cria o gerenciador e já inicia o Cão de Guarda (Janitor) em background
@@ -22,7 +22,7 @@ func NewInFlightManager(pq *queue.PriorityQueue) *InFlightManager {
 }
 
 // MarkInFlight registra que uma missão saiu da base e está em execução
-func (m *InFlightManager) MarkInFlight(mission models.Mission, duration time.Duration) {
+func (m *InFlightManager) MarkInFlight(mission model.Mission, duration time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -98,7 +98,7 @@ func (m *InFlightManager) startJanitor() {
 // sweep faz a varredura e pune os drones que perderam a conexão
 func (m *InFlightManager) sweep() {
 	m.mu.Lock()
-	var expired []models.Mission
+	var expired []model.Mission
 	now := time.Now()
 
 	for id, record := range m.records {
