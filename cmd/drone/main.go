@@ -22,21 +22,20 @@ type LedgerTransaction struct {
 }
 
 type Drone struct {
-	ID          string
-	StationURL  string
-	CometURL    string
-	HTTPClient  *server.HTTPClient
-	IsRegistered bool
+	ID               string
+	DiscoveryURL     string // O DNS nativo do Swarm (tasks.station)
+	ActiveStationURL string // O IP fixo da Estação que o adotou
+	CometURL         string
+	HTTPClient       *server.HTTPClient
+	IsRegistered     bool
 }
 
 func main() {
-	
 	droneID := os.Getenv("DRONE_ID")
 	if droneID == "" {
 		droneID = fmt.Sprintf("UAV-%d", rand.Intn(9000)+1000)
 	}
 
-	// tasks.station resolve para um IP aleatório de uma Estação viva no Swarm
 	stationURL := os.Getenv("STATION_URL")
 	if stationURL == "" {
 		stationURL = "http://tasks.station:8081"
@@ -48,15 +47,14 @@ func main() {
 	}
 
 	drone := &Drone{
-		ID:          droneID,
-		StationURL:  stationURL,
-		CometURL:    cometURL,
-		HTTPClient:  server.NewHTTPClient(2 * time.Second), // Timeout curto para o Fail-Safe reagir rápido
+		ID:           droneID,
+		DiscoveryURL: stationURL,
+		CometURL:     cometURL,
+		HTTPClient:   server.NewHTTPClient(2 * time.Second),
 	}
 
-	log.Printf("🚁 [%s] Sistemas Online. A iniciar protocolo de patrulha autónoma.", drone.ID)
+	log.Printf("🚁 [%s] Sistemas Online. A iniciar protocolo autónomo.", drone.ID)
 
-	// Loop Principal da Máquina de Estados do Drone
 	for {
 		if !drone.IsRegistered {
 			drone.register()
@@ -66,41 +64,45 @@ func main() {
 
 		mission, found := drone.pullMission()
 		if !found {
-			time.Sleep(2 * time.Second) // Aguarda por ordens
+			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		// Inicia a missão e monitoriza a ligação à Estação
 		success, flightTime := drone.executeMission(mission)
 
 		if success {
 			drone.sendAck(mission.Payload.EventID)
 			drone.saveReportToLedger(mission, flightTime)
 		} else {
-			// Fail-Safe ativado: A Estação caiu ou a rede falhou.
 			log.Printf("⚠️ [%s] ABORTAR MISSÃO! Ligação C2 perdida. A reconfigurar...", drone.ID)
-			drone.IsRegistered = false // Força a procurar uma nova Estação no próximo ciclo
+			drone.IsRegistered = false 
+			drone.ActiveStationURL = "" // Limpa a sessão morta
 			time.Sleep(3 * time.Second)
 		}
 	}
 }
 
 func (d *Drone) register() {
-	url := fmt.Sprintf("%s/api/drone/register", d.StationURL)
+	url := fmt.Sprintf("%s/api/drone/register", d.DiscoveryURL)
 	payload := map[string]string{"drone_id": d.ID}
 	
-	err := d.HTTPClient.PostJSON(url, payload, nil)
-	if err == nil {
+	var response struct {
+		DirectURL string `json:"direct_url"`
+	}
+	
+	err := d.HTTPClient.PostJSON(url, payload, &response)
+	if err == nil && response.DirectURL != "" {
+		d.ActiveStationURL = response.DirectURL
 		d.IsRegistered = true
-		log.Printf("🚁 [%s] Registado com sucesso na Estação C2.", d.ID)
+		log.Printf("🚁 [%s] Ligação C2 fixada com a Estação: %s", d.ID, d.ActiveStationURL)
 	} else {
-		log.Printf("⚠️ [%s] Falha ao contactar Estação C2. A tentar novamente...", d.ID)
+		log.Printf("⚠️ [%s] Falha ao registar. A tentar novamente...", d.ID)
 	}
 }
 
 func (d *Drone) pullMission() (model.Mission, bool) {
 	var mission model.Mission
-	url := fmt.Sprintf("%s/api/mission/pull?drone_id=%s", d.StationURL, d.ID)
+	url := fmt.Sprintf("%s/api/mission/pull?drone_id=%s", d.ActiveStationURL, d.ID)
 	
 	err := d.HTTPClient.GetJSON(url, &mission)
 	if err != nil || mission.Payload.EventID == "" {
@@ -109,60 +111,52 @@ func (d *Drone) pullMission() (model.Mission, bool) {
 	return mission, true
 }
 
-// executeMission simula o voo e gere o Heartbeat. Retorna true se concluiu, false se ativou o Fail-Safe.
 func (d *Drone) executeMission(mission model.Mission) (bool, time.Duration) {
 	eventID := mission.Payload.EventID
 	log.Printf("🚁 [%s] Em rota para o Alvo: %s (Setor %d)", d.ID, eventID[:8], mission.Payload.SectorID)
 
 	flightDuration := time.Duration(rand.Intn(6)+4) * time.Second
-	
 	abortChan := make(chan bool)
 	doneChan := make(chan bool)
 
-	// Goroutine do Heartbeat (Protocolo Fail-Safe)
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
-		
-		renewURL := fmt.Sprintf("%s/api/mission/renew?event_id=%s", d.StationURL, eventID)
+		renewURL := fmt.Sprintf("%s/api/mission/renew?event_id=%s", d.ActiveStationURL, eventID)
 		consecutiveFailures := 0
 
 		for {
 			select {
 			case <-doneChan:
-				return // Voo terminou com sucesso, parar pings
+				return
 			case <-ticker.C:
 				err := d.HTTPClient.GetJSON(renewURL, nil)
 				if err != nil {
 					consecutiveFailures++
 					log.Printf("⚠️ [%s] Ping falhou (%d/3)...", d.ID, consecutiveFailures)
 					if consecutiveFailures >= 3 {
-						abortChan <- true // Sinaliza a abortagem
+						abortChan <- true
 						return
 					}
 				} else {
-					consecutiveFailures = 0 // Recuperou a ligação, reseta o contador
+					consecutiveFailures = 0
 				}
 			}
 		}
 	}()
 
-	// Aguarda o desfecho da missão (Sucesso vs Abortagem)
 	select {
 	case <-abortChan:
-		return false, 0 // Estação caiu
+		return false, 0
 	case <-time.After(flightDuration):
-		doneChan <- true // Avisa a goroutine para parar
+		doneChan <- true
 		return true, flightDuration
 	}
 }
 
 func (d *Drone) sendAck(eventID string) {
-	url := fmt.Sprintf("%s/api/mission/ack", d.StationURL)
-	payload := map[string]string{
-		"event_id": eventID,
-		"drone_id": d.ID,
-	}
+	url := fmt.Sprintf("%s/api/mission/ack", d.ActiveStationURL)
+	payload := map[string]string{"event_id": eventID, "drone_id": d.ID}
 	_ = d.HTTPClient.PostJSON(url, payload, nil)
 }
 
@@ -190,15 +184,13 @@ func (d *Drone) saveReportToLedger(mission model.Mission, flightTime time.Durati
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "broadcast_tx_sync",
-		"params": map[string]string{
-			"tx": base64.StdEncoding.EncodeToString(txBytes),
-		},
+		"params": map[string]string{"tx": base64.StdEncoding.EncodeToString(txBytes)},
 	}
 
 	err := d.HTTPClient.PostJSON(d.CometURL, rpcPayload, nil)
 	if err != nil {
-		log.Printf("❌ [%s] Erro Crítico: Falha ao auditar missão na Blockchain: %v", d.ID, err)
+		log.Printf("❌ [%s] Falha ao auditar missão na Blockchain: %v", d.ID, err)
 		return
 	}
-	log.Printf("✅ [%s] Alvo %s Neutralizado e Auditado no Ledger (Imutável).", d.ID, mission.Payload.EventID[:8])
+	log.Printf("✅ [%s] Alvo %s Neutralizado e Auditado no Ledger.", d.ID, mission.Payload.EventID[:8])
 }

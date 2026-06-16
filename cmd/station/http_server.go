@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -32,17 +33,11 @@ func NewStationServer(brokerURL string, flightRadar *radar.InFlightManager) *Sta
 
 func (s *StationServer) SetupRouter() *http.ServeMux {
 	mux := http.NewServeMux()
-
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	// API dos Drones
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/drone/register", s.handleRegister)
 	mux.HandleFunc("/api/mission/pull", s.handleMissionPull)
 	mux.HandleFunc("/api/mission/renew", s.handleMissionRenew)
 	mux.HandleFunc("/api/mission/ack", s.handleMissionAck)
-
 	return mux
 }
 
@@ -50,14 +45,26 @@ func (s *StationServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		DroneID string `json:"drone_id"`
 	}
-	json.NewDecoder(r.Body).Decode(&payload)
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
 
 	s.dronesMutex.Lock()
 	s.RegisteredDrones[payload.DroneID] = time.Now()
 	s.dronesMutex.Unlock()
 
-	log.Printf("[C2] 🚁 Drone %s registado com sucesso nesta Estação.", payload.DroneID)
-	w.WriteHeader(http.StatusOK)
+	// DESCOBERTA DE SERVIÇO: Captura o Hostname/IP deste contentor no Swarm
+	hostname, _ := os.Hostname()
+	directURL := fmt.Sprintf("http://%s:8081", hostname)
+
+	log.Printf("[C2] 🚁 Drone %s registado. (Sessão fixada em: %s)", payload.DroneID, directURL)
+	
+	// Devolve a Rota Direta para o Drone contornar o balanceador nas próximas chamadas
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"direct_url": directURL,
+	})
 }
 
 func (s *StationServer) handleMissionPull(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +79,6 @@ func (s *StationServer) handleMissionPull(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 1. Pede missão ao Broker
 	var mission model.Mission
 	url := fmt.Sprintf("%s/queue/pop", s.BrokerURL)
 	err := s.HTTPClient.GetJSON(url, &mission)
@@ -82,9 +88,8 @@ func (s *StationServer) handleMissionPull(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// 2. Regista no Radar local (Inicia o Lease de 10 segundos)
 	s.Radar.MarkInFlight(mission, 10*time.Second)
-	log.Printf("[C2] Missão %s atribuída ao Drone %s", mission.Payload.EventID[:8], droneID)
+	log.Printf("[C2] Missão %s delegada ao Drone %s", mission.Payload.EventID[:8], droneID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(mission)
@@ -92,12 +97,10 @@ func (s *StationServer) handleMissionPull(w http.ResponseWriter, r *http.Request
 
 func (s *StationServer) handleMissionRenew(w http.ResponseWriter, r *http.Request) {
 	eventID := r.URL.Query().Get("event_id")
-	
-	// Estende a vida da missão por mais 10 segundos enquanto o Drone enviar o Ping
 	if s.Radar.RenewLease(eventID, 10*time.Second) {
 		w.WriteHeader(http.StatusOK)
 	} else {
-		w.WriteHeader(http.StatusGone) // Já expirou ou Drone não existe
+		w.WriteHeader(http.StatusGone)
 	}
 }
 
@@ -108,10 +111,8 @@ func (s *StationServer) handleMissionAck(w http.ResponseWriter, r *http.Request)
 	}
 	json.NewDecoder(r.Body).Decode(&payload)
 
-	// Remove do Radar da Estação (Parâmetro de sucesso local)
 	s.Radar.Acknowledge(payload.EventID)
 
-	// Avisa o Broker para limpar o Checkout (Ação: SUCCESS)
 	resolveURL := fmt.Sprintf("%s/queue/resolve", s.BrokerURL)
 	brokerPayload := map[string]interface{}{
 		"action":  "SUCCESS",
