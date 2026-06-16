@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"sync"
 
 	"ormuz-ledger/pkg/queue"
 	//"ormuz-ledger/pkg/radar"
@@ -14,22 +15,37 @@ import (
 	"ormuz-ledger/pkg/model"
 )
 
+// PendingMission guarda a missão que foi entregue a uma Estação e o momento exato do checkout
+type PendingMission struct {
+	Mission      model.Mission
+	CheckoutTime time.Time
+}
+
 // HTTPServer gerencia a API HTTP do Broker para C2 e Drones
 type HTTPServer struct {
 	Queue        *queue.PriorityQueue
 	ShadowBuffer *ShadowBufferManager
 	Unverified   *UnverifiedBufferManager
 	Filter	   	 *cache.IdempotencyFilter
+
+	pendingMutex    sync.RWMutex
+	pendingMissions map[string]PendingMission
 }
 
 // NewHTTPServer cria uma nova instância do servidor HTTP
 func NewHTTPServer(mq *queue.PriorityQueue, sb *ShadowBufferManager, ub *UnverifiedBufferManager, filter *cache.IdempotencyFilter) *HTTPServer {
-	return &HTTPServer{
+	server := &HTTPServer{
 		Queue:        mq,
 		ShadowBuffer: sb,
 		Unverified:   ub,
 		Filter:    	  filter,
+
+		pendingMissions: make(map[string]PendingMission),
 	}
+
+	go server.startPendingJanitor()
+
+	return server
 }
 
 // SetupRouter configura todas as rotas HTTP do servidor
@@ -40,9 +56,9 @@ func (hs *HTTPServer) SetupRouter() *http.ServeMux {
 	mux.HandleFunc("/health", hs.healthCheck)
 
 	// ========== STATION MANAGEMENT ========== 
-	// future routes
-	//mux.HandleFunc("/queue/pop", hs.HandleQueuePop)
-	//mux.HandleFunc("/queue/resolve", hs.HandleQueueResolve)
+	
+	mux.HandleFunc("/queue/pop", hs.HandleQueuePop)
+	mux.HandleFunc("/queue/resolve", hs.HandleQueueResolve)
 
 	// ========== INTERNAL API (BROKER <-> BROKER GOSSIP) ==========
 	mux.HandleFunc("/internal/shadow/sync", hs.HandleShadowSync)
@@ -63,6 +79,101 @@ func (hs *HTTPServer) healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
 	log.Printf("[HTTP] Health check: OK")
+}
+
+// ========== STATION MANAGEMENT ==========
+
+// startPendingJanitor varre o mapa de pendências e devolve à fila missões esquecidas
+func (s *HTTPServer) startPendingJanitor() {
+	ticker := time.NewTicker(5 * time.Second)
+	for range ticker.C {
+		now := time.Now()
+		s.pendingMutex.Lock()
+		
+		for eventID, pending := range s.pendingMissions {
+			// Se passou 60 segundos e a Estação não respondeu, a missão volta à estaca zero
+			if now.Sub(pending.CheckoutTime) > 60*time.Second {
+				delete(s.pendingMissions, eventID)
+				s.Queue.Enqueue(pending.Mission)
+				log.Printf("[BROKER-JANITOR] ⚠️ Missão %s sofreu TIMEOUT absoluto. Devolvida à Fila Heap.", eventID[:8])
+			}
+		}
+		
+		s.pendingMutex.Unlock()
+	}
+}
+
+func (s *HTTPServer) HandleQueuePop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	mission, found := s.Queue.Dequeue()
+	if !found {
+		w.WriteHeader(http.StatusNoContent) // Fila vazia, a Estação deve aguardar
+		return
+	}
+
+	eventID := mission.Payload.EventID
+
+	// Regista o Checkout
+	s.pendingMutex.Lock()
+	s.pendingMissions[eventID] = PendingMission{
+		Mission:      mission,
+		CheckoutTime: time.Now(),
+	}
+	s.pendingMutex.Unlock()
+
+	log.Printf("[BROKER] Checkout da Missão %s para C2 (Timeout em 60s)", eventID[:8])
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(mission)
+}
+
+// HandleQueueResolve: A Estação devolve o resultado (Falha de comunicação do Drone ou Sucesso absoluto)
+func (s *HTTPServer) HandleQueueResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		Action  string        `json:"action"` // "SUCCESS" ou "REQUEUE"
+		Mission model.Mission `json:"mission"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	eventID := payload.Mission.Payload.EventID
+
+	// Tenta resolver e remover a pendência
+	s.pendingMutex.Lock()
+	_, exists := s.pendingMissions[eventID]
+	if exists {
+		delete(s.pendingMissions, eventID)
+	}
+	s.pendingMutex.Unlock()
+
+	// Se não existe, é porque já sofreu timeout no Broker (proteção contra "fantasmas" da rede)
+	if !exists {
+		log.Printf("[BROKER] Sinal rejeitado: Missão %s já não estava pendente (Timeout ou Resolvida).", eventID[:8])
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if payload.Action == "REQUEUE" {
+		// A Estação percebeu a queda do Drone antes do timeout de 60s. Devolvemos à fila.
+		s.Queue.Enqueue(payload.Mission)
+		log.Printf("[BROKER] Missão %s devolvida à fila ativamente pela Estação", eventID[:8])
+	} else if payload.Action == "SUCCESS" {
+		log.Printf("[BROKER] Estação confirmou sucesso da Missão %s", eventID[:8])
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // ========== INTERNAL BROKER API (GOSSIP) ==========
