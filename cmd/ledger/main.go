@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	//"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,23 +13,29 @@ import (
 )
 
 func main() {
-	// porta 26658
 	addr := flag.String("addr", "tcp://0.0.0.0:26658", "Endereço do socket ABCI")
 	flag.Parse()
 
 	log.Println("[LEDGER] A iniciar o Validador do Estado do Consórcio...")
 
-	// Instancia a nossa máquina de regras de negócio
-	app := ledger.NewOrmuzLedgerApp()
+	// Cria a pasta para o banco de dados persistente
+	dbPath := "/app/data/state.db"
+	if err := os.MkdirAll("/app/data", os.ModePerm); err != nil {
+		log.Fatalf("Erro ao criar pasta do DB: %v", err)
+	}
 
-	// Inicia o servidor ABCI que o contentor do CometBFT vai consumir
+	// Instancia a nossa máquina com o banco embutido
+	app := ledger.NewOrmuzLedgerApp(dbPath)
+	defer app.Close() // Fecha o banco no encerramento
+
+	// Inicia o servidor ABCI
 	server := abciserver.NewSocketServer(*addr, app)
 	if err := server.Start(); err != nil {
 		log.Fatalf("Erro ao iniciar servidor ABCI: %v", err)
 	}
 	defer server.Stop()
 
-	log.Printf("[LEDGER] Servidor ABCI ativo em %s. A aguardar conexão do motor CometBFT...", *addr)
+	log.Printf("[LEDGER] Servidor ABCI ativo em %s. A aguardar motor CometBFT v1.0.1...", *addr)
 
 	// Graceful shutdown
 	c := make(chan os.Signal, 1)
