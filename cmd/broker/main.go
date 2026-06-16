@@ -8,9 +8,8 @@ import (
 	"os"
 	"time"
 
-	cache "ormuz-ledger/internal/inventory"
+	"ormuz-ledger/internal/inventory"
 	"ormuz-ledger/pkg/queue"
-	"ormuz-ledger/pkg/radar"
 )
 
 func main() {
@@ -22,7 +21,6 @@ func main() {
 	// 2. Inicialização dos Componentes Centrais (Fim do Estado Global)
 	missionQueue := queue.New(100)
 	shadowBuffer := NewShadowBufferManager()
-	inFlight := radar.NewInFlightManager(missionQueue)
 	idempotency := cache.NewIdempotencyFilter(60 * time.Second)
 	unverified := NewUnverifiedBufferManager()
 
@@ -46,7 +44,7 @@ func main() {
 	})
 
 	// 5. Início do Servidor HTTP (C2 e Drones)
-	httpServer := NewHTTPServer(missionQueue, inFlight, shadowBuffer, unverified, idempotency)
+	httpServer := NewHTTPServer(missionQueue, shadowBuffer, unverified, idempotency)
 	go func() {
 		log.Printf("🌐 Servidor HTTP (C2) escutando na porta %s...", httpPort)
 		if err := http.ListenAndServe(":"+httpPort, httpServer.SetupRouter()); err != nil {

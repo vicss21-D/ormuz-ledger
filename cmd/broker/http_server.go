@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"ormuz-ledger/pkg/queue"
-	"ormuz-ledger/pkg/radar"
+	//"ormuz-ledger/pkg/radar"
 	"ormuz-ledger/pkg/server"
 	"ormuz-ledger/internal/inventory"
 	"ormuz-ledger/pkg/model"
@@ -17,17 +17,15 @@ import (
 // HTTPServer gerencia a API HTTP do Broker para C2 e Drones
 type HTTPServer struct {
 	Queue        *queue.PriorityQueue
-	InFlight     *radar.InFlightManager
 	ShadowBuffer *ShadowBufferManager
 	Unverified   *UnverifiedBufferManager
 	Filter	   	 *cache.IdempotencyFilter
 }
 
 // NewHTTPServer cria uma nova instância do servidor HTTP
-func NewHTTPServer(mq *queue.PriorityQueue, ifm *radar.InFlightManager, sb *ShadowBufferManager, ub *UnverifiedBufferManager, filter *cache.IdempotencyFilter) *HTTPServer {
+func NewHTTPServer(mq *queue.PriorityQueue, sb *ShadowBufferManager, ub *UnverifiedBufferManager, filter *cache.IdempotencyFilter) *HTTPServer {
 	return &HTTPServer{
 		Queue:        mq,
-		InFlight:     ifm,
 		ShadowBuffer: sb,
 		Unverified:   ub,
 		Filter:    	  filter,
@@ -41,15 +39,10 @@ func (hs *HTTPServer) SetupRouter() *http.ServeMux {
 	// ========== HEALTH CHECK ==========
 	mux.HandleFunc("/health", hs.healthCheck)
 
-	// ========== DRONE API (C2 <-> DRONE) ==========
-	mux.HandleFunc("/api/drone/register", hs.droneRegister)
-	mux.HandleFunc("/api/drone/telemetry", hs.droneTelemetry)
-	mux.HandleFunc("/api/mission/dispatch", hs.missionDispatch)
-
-	// ========== MISSION STATE MANAGEMENT ==========
-	mux.HandleFunc("/api/mission/acknowledge", hs.missionAck)
-	mux.HandleFunc("/api/mission/nack", hs.missionNack)
-	mux.HandleFunc("/api/mission/renew", hs.missionRenew)
+	// ========== STATION MANAGEMENT ========== 
+	// future routes
+	//mux.HandleFunc("/queue/pop", hs.HandleQueuePop)
+	//mux.HandleFunc("/queue/resolve", hs.HandleQueueResolve)
 
 	// ========== INTERNAL API (BROKER <-> BROKER GOSSIP) ==========
 	mux.HandleFunc("/internal/shadow/sync", hs.HandleShadowSync)
@@ -70,162 +63,6 @@ func (hs *HTTPServer) healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)
 	log.Printf("[HTTP] Health check: OK")
-}
-
-// ========== DRONE MANAGEMENT ==========
-
-// droneRegister registra um novo drone na frota
-func (hs *HTTPServer) droneRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req server.RegisterDroneRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// TODO: Integrar com gerenciador de Drones
-	resp := server.ActionResponse{
-		Success: true,
-		Message: fmt.Sprintf("Drone %s registrado com sucesso", req.DroneID),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
-	log.Printf("[HTTP] Drone registrado: %s", req.DroneID)
-}
-
-// droneTelemetry recebe dados de telemetria do drone
-func (hs *HTTPServer) droneTelemetry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req server.TelemetryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// TODO: Processar telemetria
-	resp := server.ActionResponse{
-		Success: true,
-		Message: "Telemetria recebida",
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
-	log.Printf("[HTTP] Telemetria do drone %s: Status=%s, Battery=%.1f%%", req.DroneID, req.Status, req.Battery)
-}
-
-// ========== MISSION DISPATCH & STATE ==========
-
-// missionDispatch envia uma missão para o drone via estação
-func (hs *HTTPServer) missionDispatch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req server.DispatchMissionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Marca a missão como em voo (In-Flight)
-	hs.InFlight.MarkInFlight(req.Mission, 5*time.Minute)
-
-	resp := server.ActionResponse{
-		Success: true,
-		Message: fmt.Sprintf("Missão %s despachada", req.Mission.Payload.EventID),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
-	log.Printf("[HTTP] Missão despachada: %s para setor %d", req.Mission.Payload.EventID[:8], req.Mission.Payload.SectorID)
-}
-
-// missionAck confirma que o drone completou a missão
-func (hs *HTTPServer) missionAck(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req server.ActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Remove da memória de em-voo
-	success := hs.InFlight.Acknowledge(req.EventID)
-
-	resp := server.ActionResponse{
-		Success: success,
-		Message: fmt.Sprintf("ACK para missão %s", req.EventID[:8]),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
-	log.Printf("[HTTP] Missão confirmada: %s (Drone: %s)", req.EventID[:8], req.DroneID)
-}
-
-// missionNack nega que o drone falhou na missão
-func (hs *HTTPServer) missionNack(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req server.ActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Devolve para a fila
-	success := hs.InFlight.Nack(req.EventID)
-
-	resp := server.ActionResponse{
-		Success: success,
-		Message: fmt.Sprintf("NACK para missão %s: %s", req.EventID[:8], req.Reason),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
-	log.Printf("[HTTP] Missão rejeitada: %s (Drone: %s) - Motivo: %s", req.EventID[:8], req.DroneID, req.Reason)
-}
-
-// missionRenew renova o lease de uma missão em voo
-func (hs *HTTPServer) missionRenew(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req server.ActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Estende o lease por mais 5 minutos
-	success := hs.InFlight.RenewLease(req.EventID, 5*time.Minute)
-
-	resp := server.ActionResponse{
-		Success: success,
-		Message: fmt.Sprintf("Lease renovado para missão %s", req.EventID[:8]),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
-	log.Printf("[HTTP] Lease renovado: %s (Drone: %s)", req.EventID[:8], req.DroneID)
 }
 
 // ========== INTERNAL BROKER API (GOSSIP) ==========
