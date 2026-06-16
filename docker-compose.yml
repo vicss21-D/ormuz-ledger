@@ -68,3 +68,36 @@ services:
       - .env # Carrega os parâmetros de stress test
     depends_on:
       - broker
+
+  station:
+    build:
+      context: .
+      dockerfile: deployments/docker/station.Dockerfile
+    networks:
+      ormuz_net:
+        aliases:
+          - tasks.station # DNS nativo para Round-Robin (Self-Healing)
+    environment:
+      - BROKER_URL=http://tasks.broker:8080
+      - PORT=8081
+    deploy:
+      replicas: 2 # Iniciamos com 2 Estações
+    depends_on:
+      - broker
+
+  # ==========================================
+  # CAMADA DE EXECUÇÃO AUTÓNOMA (DRONES)
+  # ==========================================
+  drone:
+    build:
+      context: .
+      dockerfile: deployments/docker/drone.Dockerfile
+    networks:
+      - ormuz_net
+    environment:
+      - STATION_URL=http://tasks.station:8081
+      - COMET_URL=http://comet_node:26657
+    deploy:
+      replicas: 5 # Uma frota de 5 Drones a patrulhar
+    depends_on:
+      - station
