@@ -2,102 +2,123 @@ version: '3.8'
 
 networks:
   ormuz_net:
-    driver: overlay # Mantendo a compatibilidade com o seu Swarm
-    attachable: true # Permite que os containers se conectem dinamicamente
+    driver: overlay
+    attachable: true
 
 services:
   # ==========================================
-  # CAMADA DE ESTADO (A BLOCKCHAIN)
+  # CAMADA 1: AS MÁQUINAS DE ESTADO (LEDGER APPS COM LEVELDB)
   # ==========================================
-  ledger_app:
-    build:
-      context: .
-      dockerfile: deployments/docker/ledger.Dockerfile
-    networks:
-      - ormuz_net
-    ports:
-      - "26658:26658"
+  ledger_br:
+    build: { context: ., dockerfile: deployments/docker/ledger.Dockerfile }
+    networks: [ormuz_net]
+    volumes: [./deployments/data/br:/app/data]
 
-  comet_node:
+  ledger_uk:
+    build: { context: ., dockerfile: deployments/docker/ledger.Dockerfile }
+    networks: [ormuz_net]
+    volumes: [./deployments/data/uk:/app/data]
+
+  ledger_fr:
+    build: { context: ., dockerfile: deployments/docker/ledger.Dockerfile }
+    networks: [ormuz_net]
+    volumes: [./deployments/data/fr:/app/data]
+
+  ledger_us:
+    build: { context: ., dockerfile: deployments/docker/ledger.Dockerfile }
+    networks: [ormuz_net]
+    volumes: [./deployments/data/us:/app/data]
+
+  # ==========================================
+  # CAMADA 2: O CONSÓRCIO DE CONSENSO (COMETBFT P2P)
+  # ==========================================
+  
+  comet_br:
     image: cometbft/cometbft:v1.0.0
+    command: node --proxy_app=tcp://ledger_br:26658 --rpc.laddr=tcp://0.0.0.0:26657
+    volumes: [./deployments/config/br:/cometbft]
     networks:
-      - ormuz_net
+      ormuz_net:
+        aliases:
+          - node0           
+          - tasks.cometbft  
     ports:
-      - "26657:26657" # Porta RPC exposta para os Brokers
-    depends_on:
-      - ledger_app
-    entrypoint: ["sh", "-c"]
-    # O comando abaixo inicializa a génese da blockchain se não existir, e depois liga o nó à nossa App Go
-    command: >
-      "cometbft init --home /cometbft || true && 
-      cometbft node --home /cometbft 
-      --proxy_app=tcp://ledger_app:26658 
-      --rpc.laddr=tcp://0.0.0.0:26657"
+      - "26657:26657"       
+    depends_on: [ledger_br]
+
+  comet_uk:
+    image: cometbft/cometbft:v1.0.0
+    command: node --proxy_app=tcp://ledger_uk:26658 --rpc.laddr=tcp://0.0.0.0:26657
+    volumes: [./deployments/config/uk:/cometbft]
+    networks:
+      ormuz_net:
+        aliases: [node1, tasks.cometbft]
+    depends_on: [ledger_uk]
+
+  comet_fr:
+    image: cometbft/cometbft:v1.0.0
+    command: node --proxy_app=tcp://ledger_fr:26658 --rpc.laddr=tcp://0.0.0.0:26657
+    volumes: [./deployments/config/fr:/cometbft]
+    networks:
+      ormuz_net:
+        aliases: [node2, tasks.cometbft]
+    depends_on: [ledger_fr]
+
+  comet_us:
+    image: cometbft/cometbft:v1.0.0
+    command: node --proxy_app=tcp://ledger_us:26658 --rpc.laddr=tcp://0.0.0.0:26657
+    volumes: [./deployments/config/us:/cometbft]
+    networks:
+      ormuz_net:
+        aliases: [node3, tasks.cometbft]
+    depends_on: [ledger_us]
 
   # ==========================================
-  # CAMADA DE ROTEAMENTO TÁTICO (BROKERS)
+  # CAMADA 3: ROTEAMENTO ECONÓMICO (BROKERS)
   # ==========================================
   broker:
-    build:
-      context: .
-      dockerfile: deployments/docker/broker.Dockerfile
-    networks:
-      ormuz_net:
-        aliases:
-          - tasks.broker # O DNS vital para o Consistent Hashing
+    build: { context: ., dockerfile: deployments/docker/broker.Dockerfile }
     environment:
-      - TOTAL_SECTORS=25
-      - COMET_URL=http://comet_node:26657 # Aponta para o motor de consenso
-      - UDP_PORT=9000
-      - HTTP_PORT=8080
-    deploy:
-      replicas: 3 # Instancia 3 brokers para testar a Sala de Espera e o Gossip
-    depends_on:
-      - comet_node
-
-  # ==========================================
-  # CAMADA DE BORDA (GERADOR DE CARGA)
-  # ==========================================
-  sensor:
-    build:
-      context: .
-      dockerfile: deployments/docker/sensor.Dockerfile
-    networks:
-      - ormuz_net
-    env_file:
-      - .env # Carrega os parâmetros de stress test
-    depends_on:
-      - broker
-
-  station:
-    build:
-      context: .
-      dockerfile: deployments/docker/station.Dockerfile
+      - LEDGER_URL=http://tasks.cometbft:26657
+      - PORT=8080
     networks:
       ormuz_net:
-        aliases:
-          - tasks.station # DNS nativo para Round-Robin (Self-Healing)
+        aliases: [tasks.broker]
+    deploy:
+      replicas: 2
+    depends_on: [comet_br, comet_uk, comet_fr, comet_us]
+
+  # ==========================================
+  # CAMADA 4: COMANDO E CONTROLO (ESTAÇÕES)
+  # ==========================================
+  station:
+    build: { context: ., dockerfile: deployments/docker/station.Dockerfile }
     environment:
       - BROKER_URL=http://tasks.broker:8080
       - PORT=8081
+    networks:
+      ormuz_net:
+        aliases: [tasks.station]
     deploy:
-      replicas: 2 # Iniciamos com 2 Estações
-    depends_on:
-      - broker
+      replicas: 2
+    depends_on: [broker]
 
   # ==========================================
-  # CAMADA DE EXECUÇÃO AUTÓNOMA (DRONES)
+  # CAMADA 5: EXECUÇÃO E SENSORES (ATUADORES)
   # ==========================================
   drone:
-    build:
-      context: .
-      dockerfile: deployments/docker/drone.Dockerfile
-    networks:
-      - ormuz_net
+    build: { context: ., dockerfile: deployments/docker/drone.Dockerfile }
     environment:
       - STATION_URL=http://tasks.station:8081
-      - COMET_URL=http://comet_node:26657
+      - COMET_URL=http://tasks.cometbft:26657
+    networks: [ormuz_net]
     deploy:
-      replicas: 5 # Uma frota de 5 Drones a patrulhar
-    depends_on:
-      - station
+      replicas: 5
+    depends_on: [station]
+
+  sensor:
+    build: { context: ., dockerfile: deployments/docker/sensor.Dockerfile }
+    environment:
+      - BROKER_URL=http://tasks.broker:8080
+    networks: [ormuz_net]
+    depends_on: [broker]
