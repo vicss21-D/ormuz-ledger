@@ -88,7 +88,7 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 		hasBeenProcessed, _ := app.db.Has(processedKey, nil)
 		
 		if hasBeenProcessed {
-			log.Printf("⚠️ Operação Duplicada rejeitada! Tipo: %s | Evento: %s", tx.Type, tx.EventID[:8])
+			log.Printf("Operação Duplicada rejeitada! Tipo: %s | Evento: %s", tx.Type, tx.EventID[:8])
 			txResults = append(txResults, &types.ExecTxResult{Code: 4, Log: "Transação já processada"})
 			continue
 		}
@@ -96,7 +96,7 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 		// 2. MÁQUINA DE ESTADOS (Responsabilidade Única)
 		switch tx.Type {
 		case "SPEND_CREDIT":
-			// Apenas altera saldo, não grava relatório
+			// Apenas altera o saldo
 			balanceKey := []byte(fmt.Sprintf("balance:%s", tx.NationID))
 			balanceBytes, _ := app.db.Get(balanceKey, nil)
 			balance, _ := strconv.Atoi(string(balanceBytes))
@@ -106,15 +106,17 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 			log.Printf("[LEDGER] Crédito debitado de %s. Saldo: %d (Evento: %s)", tx.NationID, newBalance, tx.EventID[:8])
 
 		case "SAVE_REPORT":
-			// Apenas grava relatório, não altera saldo
-			// Gravamos txBytes inteiro para o Explorer conseguir parsear a estrutura JSON perfeitamente
-			reportKey := []byte(fmt.Sprintf("report:%s", tx.EventID))
-			app.db.Put(reportKey, txBytes, nil)
-			log.Printf("[LEDGER] Relatório arquivado imutavelmente. (Evento: %s)", tx.EventID[:8])
+			// Apenas regista a passagem documental no log
+			log.Printf("[LEDGER] Relatório físico validado. (Evento: %s)", tx.EventID[:8])
 		}
 
-		// 3. APLICA A TRAVA ESPECÍFICA
+		// 3. APLICA A TRAVA ESPECÍFICA E GRAVA NO EXPLORER
 		app.db.Put(processedKey, []byte("true"), nil)
+		
+		// Usamos o tx.Type no nome da chave para que o Débito e o Relatório coexistam pacificamente no Explorer
+		explorerKey := []byte(fmt.Sprintf("report:%s_%s", tx.Type, tx.EventID))
+		app.db.Put(explorerKey, txBytes, nil)
+
 		txResults = append(txResults, &types.ExecTxResult{Code: 0})
 	}
 

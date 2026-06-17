@@ -1,1 +1,10 @@
 .env
+
+# Ignorar as bases de dados da aplicação Go (LevelDB)
+deployments/data/*
+!deployments/data/.gitkeep
+
+# Ignorar o histórico de blocos do CometBFT, mas rastrear configurações
+deployments/config/*/data/*.db
+deployments/config/*/data/*.wal
+deployments/config/*/data/*.log

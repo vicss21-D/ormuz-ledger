@@ -18,9 +18,9 @@
 				32,
 				10
 			],
-			"attempts": 7,
+			"attempts": 8,
 			"bucket_type": 1,
-			"last_attempt": "2026-06-17T16:17:29.456074935Z",
+			"last_attempt": "2026-06-17T20:19:10.440564559Z",
 			"last_success": "0001-01-01T00:00:00Z",
 			"last_ban_time": "0001-01-01T00:00:00Z"
 		},
@@ -41,9 +41,9 @@
 				129,
 				10
 			],
-			"attempts": 53,
+			"attempts": 62,
 			"bucket_type": 1,
-			"last_attempt": "2026-06-17T16:20:29.4485954Z",
+			"last_attempt": "2026-06-17T20:30:40.414653253Z",
 			"last_success": "0001-01-01T00:00:00Z",
 			"last_ban_time": "0001-01-01T00:00:00Z"
 		},
@@ -87,9 +87,9 @@
 				32,
 				129
 			],
-			"attempts": 13,
+			"attempts": 14,
 			"bucket_type": 1,
-			"last_attempt": "2026-06-17T16:20:29.448585755Z",
+			"last_attempt": "2026-06-17T20:19:10.440039068Z",
 			"last_success": "0001-01-01T00:00:00Z",
 			"last_ban_time": "0001-01-01T00:00:00Z"
 		}
