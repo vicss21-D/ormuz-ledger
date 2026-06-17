@@ -27,16 +27,19 @@ type HTTPServer struct {
 	Unverified   *UnverifiedBufferManager
 	Filter	   	 *cache.IdempotencyFilter
 
+	LedgerClient *LedgerClient
+
 	pendingMutex    sync.RWMutex
 	pendingMissions map[string]PendingMission
 }
 
 // NewHTTPServer cria uma nova instância do servidor HTTP
-func NewHTTPServer(mq *queue.PriorityQueue, sb *ShadowBufferManager, ub *UnverifiedBufferManager, filter *cache.IdempotencyFilter) *HTTPServer {
+func NewHTTPServer(mq *queue.PriorityQueue, sb *ShadowBufferManager, ub *UnverifiedBufferManager, lc *LedgerClient, filter *cache.IdempotencyFilter) *HTTPServer {
 	server := &HTTPServer{
 		Queue:        mq,
 		ShadowBuffer: sb,
 		Unverified:   ub,
+		LedgerClient: lc,
 		Filter:    	  filter,
 
 		pendingMissions: make(map[string]PendingMission),
@@ -58,6 +61,9 @@ func (hs *HTTPServer) SetupRouter() *http.ServeMux {
 	
 	mux.HandleFunc("/queue/pop", hs.HandleQueuePop)
 	mux.HandleFunc("/queue/resolve", hs.HandleQueueResolve)
+
+	// ========== EXPLORER ==========
+	mux.HandleFunc("/explorer", hs.handleExplorer)
 
 	// ========== INTERNAL API (BROKER <-> BROKER GOSSIP) ==========
 	mux.HandleFunc("/internal/shadow/sync", hs.HandleShadowSync)
@@ -244,4 +250,25 @@ func (hs *HTTPServer) topologySync(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]bool{"received": true})
+}
+
+// ========== EXPLORER ==========
+
+// handleExplorer expõe o estado global do Ledger para entidades externas (C2, Analistas, etc)
+func (s *HTTPServer) handleExplorer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stateJSON, err := s.LedgerClient.QueryGlobalState()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Falha ao ler a Blockchain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Devolve o JSON formatado e legível para a entidade
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(stateJSON)
 }

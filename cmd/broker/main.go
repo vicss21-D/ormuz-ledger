@@ -44,7 +44,7 @@ func main() {
 	})
 
 	// 5. Início do Servidor HTTP (C2 e Drones)
-	httpServer := NewHTTPServer(missionQueue, shadowBuffer, unverified, idempotency)
+	httpServer := NewHTTPServer(missionQueue, shadowBuffer, unverified, ledgerClient, idempotency)
 	go func() {
 		log.Printf("🌐 Servidor HTTP (C2) escutando na porta %s...", httpPort)
 		if err := http.ListenAndServe(":"+httpPort, httpServer.SetupRouter()); err != nil {

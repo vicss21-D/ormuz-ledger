@@ -84,6 +84,8 @@ services:
     networks:
       ormuz_net:
         aliases: [tasks.broker]
+    ports:
+      - "8080-8081:8080"
     deploy:
       replicas: 2
     depends_on: [comet_br, comet_uk, comet_fr, comet_us]

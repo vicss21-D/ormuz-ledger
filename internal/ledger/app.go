@@ -82,19 +82,21 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 			continue
 		}
 
-		// 1. PREVENÇÃO DE DUPLO GASTO
-		processedKey := []byte(fmt.Sprintf("processed:%s", tx.EventID))
+		// 1. PREVENÇÃO DE DUPLICAÇÃO DESACOPLADA
+		// A chave agora inclui o Tipo. Ex: processed:SPEND_CREDIT_68124a7c... e processed:SAVE_REPORT_68124a7c...
+		processedKey := []byte(fmt.Sprintf("processed:%s_%s", tx.Type, tx.EventID))
 		hasBeenProcessed, _ := app.db.Has(processedKey, nil)
 		
 		if hasBeenProcessed {
-			log.Printf("⚠️ Gasto Duplo rejeitado! Evento: %s", tx.EventID[:8])
+			log.Printf("⚠️ Operação Duplicada rejeitada! Tipo: %s | Evento: %s", tx.Type, tx.EventID[:8])
 			txResults = append(txResults, &types.ExecTxResult{Code: 4, Log: "Transação já processada"})
 			continue
 		}
 
-		// 2. ALTERAÇÃO DE ESTADO
+		// 2. MÁQUINA DE ESTADOS (Responsabilidade Única)
 		switch tx.Type {
 		case "SPEND_CREDIT":
+			// Apenas altera saldo, não grava relatório
 			balanceKey := []byte(fmt.Sprintf("balance:%s", tx.NationID))
 			balanceBytes, _ := app.db.Get(balanceKey, nil)
 			balance, _ := strconv.Atoi(string(balanceBytes))
@@ -104,13 +106,14 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 			log.Printf("[LEDGER] Crédito debitado de %s. Saldo: %d (Evento: %s)", tx.NationID, newBalance, tx.EventID[:8])
 
 		case "SAVE_REPORT":
-			// Guardar o relatório no LevelDB
+			// Apenas grava relatório, não altera saldo
+			// Gravamos txBytes inteiro para o Explorer conseguir parsear a estrutura JSON perfeitamente
 			reportKey := []byte(fmt.Sprintf("report:%s", tx.EventID))
-			app.db.Put(reportKey, []byte(tx.Payload), nil)
-			log.Printf("[LEDGER] Relatório arquivado imutavelmente para o Evento: %s", tx.EventID[:8])
+			app.db.Put(reportKey, txBytes, nil)
+			log.Printf("[LEDGER] Relatório arquivado imutavelmente. (Evento: %s)", tx.EventID[:8])
 		}
 
-		// 3. APLICA A TRAVA
+		// 3. APLICA A TRAVA ESPECÍFICA
 		app.db.Put(processedKey, []byte("true"), nil)
 		txResults = append(txResults, &types.ExecTxResult{Code: 0})
 	}
@@ -123,6 +126,38 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 
 // Consulta em O(1) pelo Broker
 func (app *OrmuzLedgerApp) Query(ctx context.Context, req *types.QueryRequest) (*types.QueryResponse, error) {
+	// Nova rota de exploração global do Estado
+	if req.Path == "state" {
+		state := make(map[string]interface{})
+		balances := make(map[string]int)
+		reports := make(map[string]string)
+
+		// Varre o banco de dados local para recolher o estado atual
+		iter := app.db.NewIterator(nil, nil)
+		defer iter.Release()
+		
+		for iter.Next() {
+			key := string(iter.Key())
+			val := string(iter.Value())
+			
+			if strings.HasPrefix(key, "balance:") {
+				nation := strings.Split(key, ":")[1]
+				b, _ := strconv.Atoi(val)
+				balances[nation] = b
+			} else if strings.HasPrefix(key, "report:") {
+				eventID := strings.Split(key, ":")[1]
+				reports[eventID] = val
+			}
+		}
+
+		state["balances"] = balances
+		state["reports"] = reports
+
+		stateBytes, _ := json.Marshal(state)
+		return &types.QueryResponse{Code: 0, Value: stateBytes}, nil
+	}
+
+	// Rota antiga de saldo específico (mantida por compatibilidade)
 	parts := strings.Split(req.Path, "/")
 	if len(parts) == 2 && parts[0] == "balance" {
 		nation := parts[1]
@@ -132,6 +167,7 @@ func (app *OrmuzLedgerApp) Query(ctx context.Context, req *types.QueryRequest) (
 		}
 		return &types.QueryResponse{Code: 0, Value: balanceBytes}, nil
 	}
+	
 	return &types.QueryResponse{Code: 1, Log: "Rota não suportada"}, nil
 }
 
