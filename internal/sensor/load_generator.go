@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"ormuz-ledger/internal/domain/sensor"
+
 	"github.com/google/uuid"
 )
 
+// Engine generates telemetry data for testing the system.
 type Engine struct {
 	TotalSectors        int
 	Frequency           time.Duration
@@ -21,7 +23,7 @@ type Engine struct {
 	Nations             []string // Lista de Nações do Consórcio
 }
 
-// Start inicia o loop gerando dados multiplexados e enviando pelo canal
+// Start begins generating telemetry data and sends it to the output channel.
 func (e *Engine) Start(ctx context.Context, out chan<- sensor.Telemetry) {
 
 	ticker := time.NewTicker(e.Frequency)
@@ -38,6 +40,7 @@ func (e *Engine) Start(ctx context.Context, out chan<- sensor.Telemetry) {
 	}
 }
 
+// fire generates a single telemetry event and sends it to the output channel.
 func (e *Engine) fire(out chan<- sensor.Telemetry) {
 	isThreat := rand.Float64() < e.ThreatProbability
 	isCritical := false

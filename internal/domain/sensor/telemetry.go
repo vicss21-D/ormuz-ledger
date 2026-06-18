@@ -6,12 +6,13 @@ type Telemetry struct {
 	SectorID      int    `json:"sector_id"`      // ID do setor onde o sensor está localizado
 	IsRequisition bool   `json:"is_requisition"` // Indica se a telemetria deverá ser tratada como requisição
 	IsCritical    bool   `json:"is_critical"`    // Indica se a telemetria é crítica
-	
+
 	// CAMPOS PARA INTEGRAÇÃO BLOCKCHAIN
-	NationID      string `json:"nation_id"`      // Identifica a Nação/Entidade dona do setor que pagará o crédito
-	Signature     string `json:"signature"`      // Assinatura criptográfica que prova a autenticidade da requisição
+	NationID  string `json:"nation_id"` // Identifica a Nação/Entidade dona do setor que pagará o crédito
+	Signature string `json:"signature"` // Assinatura criptográfica que prova a autenticidade da requisição
 }
 
+// NewTelemetry creates a telemetry object with the provided parameters.
 func NewTelemetry(eventID string, sensorID string, sectorID int, isRequisition bool, isCritical bool, nationID string, signature string) Telemetry {
 	return Telemetry{
 		EventID:       eventID,

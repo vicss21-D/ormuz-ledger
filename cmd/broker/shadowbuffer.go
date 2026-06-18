@@ -8,15 +8,17 @@ import (
 	"ormuz-ledger/pkg/queue"
 )
 
+// ShadowBufferManager stores missions that don't belong to this broker.
 type ShadowBufferManager struct {
 	Buffer sync.Map
 }
 
+// NewShadowBufferManager creates a new shadow buffer manager.
 func NewShadowBufferManager() *ShadowBufferManager {
 	return &ShadowBufferManager{}
 }
 
-// RescueOrphanedMissions varre o buffer e move missões que agora pertencem a este broker
+// RescueOrphanedMissions moves missions that now belong to this broker to the queue.
 func (sb *ShadowBufferManager) RescueOrphanedMissions(router *SectorRouter, missionQueue *queue.PriorityQueue) {
 	count := 0
 
@@ -45,15 +47,14 @@ func (sb *ShadowBufferManager) RescueOrphanedMissions(router *SectorRouter, miss
 	}
 }
 
-// Store armazena uma missão que não pertence a este broker
-// Será resgatada quando o broker se tornar o novo dono (failover)
+// Store archives a mission that doesn't belong to this broker for failover.
 func (sb *ShadowBufferManager) Store(mission model.Mission) {
 	sb.Buffer.Store(mission.Payload.EventID, mission)
 	log.Printf("[SHADOW-BUFFER] Missão %s armazenada (Setor %d)",
 		mission.Payload.EventID[:8], mission.Payload.SectorID)
 }
 
-// ClearMission remove uma missão da memória local
+// ClearMission removes a mission from local memory.
 func (sb *ShadowBufferManager) ClearMission(eventID string) {
 	sb.Buffer.Delete(eventID)
 	log.Printf("[SHADOW-BUFFER] Evento %s expurgado da memória local.", eventID[:8])

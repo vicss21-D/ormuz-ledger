@@ -2,18 +2,23 @@ package ledger
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
 
+	"ormuz-ledger/internal/domain/ledger"
+
 	"github.com/cometbft/cometbft/abci/types"
 	"github.com/syndtr/goleveldb/leveldb"
-	"ormuz-ledger/internal/domain/ledger"
 )
 
-// OrmuzLedgerApp é a nossa máquina de estados da blockchain
+var AuthorizedKeys = make(map[string]string)
+
+// OrmuzLedgerApp implements the blockchain state machine with persistent storage.
 type OrmuzLedgerApp struct {
 	types.BaseApplication
 
@@ -21,7 +26,22 @@ type OrmuzLedgerApp struct {
 	db *leveldb.DB
 }
 
-// NewOrmuzLedgerApp inicializa a simulação da economia com banco local
+func init() {
+	nations := []string{"BR", "FR", "UK", "US"}
+	for _, n := range nations {
+		// Usa a mesma seed secreta do Broker para calcular a contraparte Pública
+		seedString := fmt.Sprintf("%-32s", n+"-SECRET-SEED-ORMUZ-2026")
+		seed := []byte(seedString)[:32]
+
+		priv := ed25519.NewKeyFromSeed(seed)
+		pub := priv.Public().(ed25519.PublicKey)
+
+		AuthorizedKeys[n] = hex.EncodeToString(pub)
+	}
+	log.Println("🔐 Chaves Públicas do Consórcio carregadas com sucesso.")
+}
+
+// NewOrmuzLedgerApp initializes the ledger application with persistent database.
 func NewOrmuzLedgerApp(dbPath string) *OrmuzLedgerApp {
 	db, err := leveldb.OpenFile(dbPath, nil)
 	if err != nil {
@@ -42,12 +62,12 @@ func NewOrmuzLedgerApp(dbPath string) *OrmuzLedgerApp {
 	return &OrmuzLedgerApp{db: db}
 }
 
-// Fechar conexão com o banco ao desligar o nó
+// Close closes the database connection on shutdown.
 func (app *OrmuzLedgerApp) Close() {
 	app.db.Close()
 }
 
-// CheckTx (Fase de Mempool): Chamado pelo CometBFT ANTES do consenso.
+// CheckTx validates a transaction before consensus (mempool phase).
 func (app *OrmuzLedgerApp) CheckTx(ctx context.Context, req *types.CheckTxRequest) (*types.CheckTxResponse, error) {
 	var tx ledger.Transaction
 	if err := json.Unmarshal(req.Tx, &tx); err != nil {
@@ -59,7 +79,7 @@ func (app *OrmuzLedgerApp) CheckTx(ctx context.Context, req *types.CheckTxReques
 		if err != nil {
 			return &types.CheckTxResponse{Code: 2, Log: "Nação não reconhecida"}, nil
 		}
-		
+
 		balance, _ := strconv.Atoi(string(balanceBytes))
 		if balance <= 0 {
 			// Rejeita a transação
@@ -70,13 +90,13 @@ func (app *OrmuzLedgerApp) CheckTx(ctx context.Context, req *types.CheckTxReques
 	return &types.CheckTxResponse{Code: 0}, nil
 }
 
-// FinalizeBlock (Fase de Bloco): É aqui que a mutação de estado se torna definitiva.
+// FinalizeBlock applies finalized transactions and updates the state permanently.
 func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.FinalizeBlockRequest) (*types.FinalizeBlockResponse, error) {
 	txResults := make([]*types.ExecTxResult, 0, len(req.Txs))
 
 	for _, txBytes := range req.Txs {
 		var tx ledger.Transaction
-		
+
 		if err := json.Unmarshal(txBytes, &tx); err != nil {
 			txResults = append(txResults, &types.ExecTxResult{Code: 1, Log: "Falha no parse"})
 			continue
@@ -86,7 +106,7 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 		// A chave agora inclui o Tipo. Ex: processed:SPEND_CREDIT_68124a7c... e processed:SAVE_REPORT_68124a7c...
 		processedKey := []byte(fmt.Sprintf("processed:%s_%s", tx.Type, tx.EventID))
 		hasBeenProcessed, _ := app.db.Has(processedKey, nil)
-		
+
 		if hasBeenProcessed {
 			log.Printf("Operação Duplicada rejeitada! Tipo: %s | Evento: %s", tx.Type, tx.EventID[:8])
 			txResults = append(txResults, &types.ExecTxResult{Code: 4, Log: "Transação já processada"})
@@ -100,7 +120,7 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 			balanceKey := []byte(fmt.Sprintf("balance:%s", tx.NationID))
 			balanceBytes, _ := app.db.Get(balanceKey, nil)
 			balance, _ := strconv.Atoi(string(balanceBytes))
-			
+
 			newBalance := balance - 1
 			app.db.Put(balanceKey, []byte(strconv.Itoa(newBalance)), nil)
 			log.Printf("[LEDGER] Crédito debitado de %s. Saldo: %d (Evento: %s)", tx.NationID, newBalance, tx.EventID[:8])
@@ -112,7 +132,7 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 
 		// 3. APLICA A TRAVA ESPECÍFICA E GRAVA NO EXPLORER
 		app.db.Put(processedKey, []byte("true"), nil)
-		
+
 		// Usamos o tx.Type no nome da chave para que o Débito e o Relatório coexistam pacificamente no Explorer
 		explorerKey := []byte(fmt.Sprintf("report:%s_%s", tx.Type, tx.EventID))
 		app.db.Put(explorerKey, txBytes, nil)
@@ -126,7 +146,7 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 	}, nil
 }
 
-// Consulta em O(1) pelo Broker
+// Query retrieves state information from the ledger.
 func (app *OrmuzLedgerApp) Query(ctx context.Context, req *types.QueryRequest) (*types.QueryResponse, error) {
 	// Nova rota de exploração global do Estado
 	if req.Path == "state" {
@@ -137,11 +157,11 @@ func (app *OrmuzLedgerApp) Query(ctx context.Context, req *types.QueryRequest) (
 		// Varre o banco de dados local para recolher o estado atual
 		iter := app.db.NewIterator(nil, nil)
 		defer iter.Release()
-		
+
 		for iter.Next() {
 			key := string(iter.Key())
 			val := string(iter.Value())
-			
+
 			if strings.HasPrefix(key, "balance:") {
 				nation := strings.Split(key, ":")[1]
 				b, _ := strconv.Atoi(val)
@@ -169,10 +189,11 @@ func (app *OrmuzLedgerApp) Query(ctx context.Context, req *types.QueryRequest) (
 		}
 		return &types.QueryResponse{Code: 0, Value: balanceBytes}, nil
 	}
-	
+
 	return &types.QueryResponse{Code: 1, Log: "Rota não suportada"}, nil
 }
 
+// Commit signals the end of a block (state finalization).
 func (app *OrmuzLedgerApp) Commit(ctx context.Context, req *types.CommitRequest) (*types.CommitResponse, error) {
 	return &types.CommitResponse{}, nil
 }

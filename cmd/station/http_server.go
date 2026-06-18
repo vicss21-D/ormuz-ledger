@@ -14,6 +14,7 @@ import (
 	"ormuz-ledger/pkg/server"
 )
 
+// StationServer manages command and control for drones.
 type StationServer struct {
 	BrokerURL        string
 	Radar            *radar.InFlightManager
@@ -22,6 +23,7 @@ type StationServer struct {
 	RegisteredDrones map[string]time.Time
 }
 
+// NewStationServer creates a station server connected to a broker.
 func NewStationServer(brokerURL string, flightRadar *radar.InFlightManager) *StationServer {
 	return &StationServer{
 		BrokerURL:        brokerURL,
@@ -31,6 +33,7 @@ func NewStationServer(brokerURL string, flightRadar *radar.InFlightManager) *Sta
 	}
 }
 
+// SetupRouter configures all HTTP routes for the station.
 func (s *StationServer) SetupRouter() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -41,6 +44,7 @@ func (s *StationServer) SetupRouter() *http.ServeMux {
 	return mux
 }
 
+// handleRegister processes drone registration and returns direct connection URL.
 func (s *StationServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		DroneID string `json:"drone_id"`
@@ -59,7 +63,7 @@ func (s *StationServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	directURL := fmt.Sprintf("http://%s:8081", hostname)
 
 	log.Printf("[C2] 🚁 Drone %s registado. (Sessão fixada em: %s)", payload.DroneID, directURL)
-	
+
 	// Devolve a Rota Direta para o Drone contornar o balanceador nas próximas chamadas
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -67,9 +71,10 @@ func (s *StationServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleMissionPull retrieves the next mission for a registered drone.
 func (s *StationServer) handleMissionPull(w http.ResponseWriter, r *http.Request) {
 	droneID := r.URL.Query().Get("drone_id")
-	
+
 	s.dronesMutex.RLock()
 	_, isRegistered := s.RegisteredDrones[droneID]
 	s.dronesMutex.RUnlock()
@@ -82,7 +87,7 @@ func (s *StationServer) handleMissionPull(w http.ResponseWriter, r *http.Request
 	var mission model.Mission
 	url := fmt.Sprintf("%s/queue/pop", s.BrokerURL)
 	err := s.HTTPClient.GetJSON(url, &mission)
-	
+
 	if err != nil || mission.Payload.EventID == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -95,6 +100,7 @@ func (s *StationServer) handleMissionPull(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(mission)
 }
 
+// handleMissionRenew extends a drone's mission lease.
 func (s *StationServer) handleMissionRenew(w http.ResponseWriter, r *http.Request) {
 	eventID := r.URL.Query().Get("event_id")
 	if s.Radar.RenewLease(eventID, 10*time.Second) {
@@ -104,6 +110,7 @@ func (s *StationServer) handleMissionRenew(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// handleMissionAck acknowledges mission completion and notifies the broker.
 func (s *StationServer) handleMissionAck(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		EventID string `json:"event_id"`

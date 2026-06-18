@@ -8,10 +8,11 @@ import (
 	"os"
 	"time"
 
-	"ormuz-ledger/internal/inventory"
+	cache "ormuz-ledger/internal/inventory"
 	"ormuz-ledger/pkg/queue"
 )
 
+// main initializes and runs the broker service with mission processing and HTTP API.
 func main() {
 	// 1. Configurações de Ambiente
 	udpPort := getEnv("UDP_PORT", "9000")
@@ -59,6 +60,7 @@ func main() {
 	startUDPIngestion(udpPort, rawPacketsChan)
 }
 
+// startUDPIngestion listens for incoming UDP packets and sends them to the processor.
 func startUDPIngestion(port string, outChan chan<- []byte) {
 	addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("0.0.0.0:%s", port))
 	conn, err := net.ListenUDP("udp", addr)
@@ -87,6 +89,7 @@ func startUDPIngestion(port string, outChan chan<- []byte) {
 	}
 }
 
+// getEnv retrieves an environment variable or returns a fallback value.
 func getEnv(key, fallback string) string {
 	if val, ok := os.LookupEnv(key); ok {
 		return val

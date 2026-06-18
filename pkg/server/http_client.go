@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// HTTPClient provides HTTP communication with exponential backoff retry logic.
 type HTTPClient struct {
 	client         *http.Client
 	maxRetries     int
@@ -18,7 +19,7 @@ type HTTPClient struct {
 	timeout        time.Duration
 }
 
-// NewHTTPClient cria cliente HTTP com tratamento de falhas
+// NewHTTPClient creates an HTTP client with default retry and timeout settings.
 func NewHTTPClient(timeout time.Duration) *HTTPClient {
 	return &HTTPClient{
 		client: &http.Client{
@@ -31,7 +32,7 @@ func NewHTTPClient(timeout time.Duration) *HTTPClient {
 	}
 }
 
-// PostJSON faz requisição POST com retry exponencial
+// PostJSON sends a POST request with JSON payload and implements exponential backoff retry.
 func (hc *HTTPClient) PostJSON(url string, body interface{}, result interface{}) error {
 	var payload []byte
 	var err error
@@ -105,7 +106,7 @@ func (hc *HTTPClient) PostJSON(url string, body interface{}, result interface{})
 	return fmt.Errorf("falha após %d tentativas: %v", hc.maxRetries, lastErr)
 }
 
-// GetJSON faz requisição GET com retry exponencial
+// GetJSON sends a GET request and implements exponential backoff retry.
 func (hc *HTTPClient) GetJSON(url string, result interface{}) error {
 	var lastErr error
 	backoff := hc.initialBackoff
@@ -160,7 +161,7 @@ func (hc *HTTPClient) GetJSON(url string, result interface{}) error {
 	return fmt.Errorf("falha após %d tentativas: %v", hc.maxRetries, lastErr)
 }
 
-// NewErrorResponse cria resposta de erro
+// NewErrorResponse creates an error response with timestamp.
 func NewErrorResponse(err string, code string) ErrorResponse {
 	return ErrorResponse{
 		Error:     err,

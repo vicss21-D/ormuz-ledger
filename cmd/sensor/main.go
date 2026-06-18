@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"ormuz-ledger/internal/domain/sensor"
+
 	"github.com/joho/godotenv"
 
 	generator "ormuz-ledger/internal/sensor"
@@ -32,6 +33,7 @@ var (
 	previousState string
 )
 
+// watchBrokerDNS monitors broker service discovery via DNS.
 func watchBrokerDNS(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
@@ -65,6 +67,7 @@ func watchBrokerDNS(ctx context.Context) {
 	}
 }
 
+// sendToBroker transmits telemetry data to a broker via UDP.
 func sendToBroker(brokerIP string, data []byte) {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%s", brokerIP, BrokerPort))
 	if err != nil {
@@ -78,9 +81,10 @@ func sendToBroker(brokerIP string, data []byte) {
 	_, _ = conn.Write(data)
 }
 
+// main initializes and runs the telemetry generator and sensor simulator.
 func main() {
 	// 1. Carregamento do Arquivo .env
-	// Se o arquivo não existir (ex: rodando direto no cluster Swarm de produção), 
+	// Se o arquivo não existir (ex: rodando direto no cluster Swarm de produção),
 	// ele ignora o erro e continua usando as variáveis de ambiente injetadas pelo SO/Docker.
 	if err := godotenv.Load(); err != nil {
 		log.Println("[BOOT] Arquivo .env não encontrado. Utilizando variáveis do ambiente hospedeiro.")
@@ -152,6 +156,7 @@ func main() {
 	time.Sleep(500 * time.Millisecond)
 }
 
+// getEnv retrieves an environment variable or returns a fallback value.
 func getEnv(key, fallback string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value

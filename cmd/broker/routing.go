@@ -12,7 +12,7 @@ import (
 	"github.com/stathat/consistent"
 )
 
-// SectorRouter gerencia a topologia da rede de brokers
+// SectorRouter manages broker topology and sector ownership using consistent hashing.
 type SectorRouter struct {
 	ring               *consistent.Consistent
 	mu                 sync.RWMutex
@@ -21,6 +21,7 @@ type SectorRouter struct {
 	dnsTarget          string
 }
 
+// NewSectorRouter creates a new router for sector management.
 func NewSectorRouter(sectorCount int, dnsTarget string) *SectorRouter {
 	return &SectorRouter{
 		ring:        consistent.New(),
@@ -29,7 +30,7 @@ func NewSectorRouter(sectorCount int, dnsTarget string) *SectorRouter {
 	}
 }
 
-// WatchTopology monitora alterações no Docker Swarm e rebalanceia o anel
+// WatchTopology monitors Docker Swarm topology changes and rebalances the ring.
 func (r *SectorRouter) WatchTopology(onTopologyChange func()) {
 	for {
 		ips, err := net.LookupIP(r.dnsTarget)
@@ -61,7 +62,7 @@ func (r *SectorRouter) WatchTopology(onTopologyChange func()) {
 	}
 }
 
-// GetOwnerIP retorna quem é o primário responsável pelo setor
+// GetOwnerIP returns the primary broker for a sector.
 func (r *SectorRouter) GetOwnerIP(sectorID int) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -74,7 +75,7 @@ func (r *SectorRouter) GetOwnerIP(sectorID int) string {
 	return ownerIP
 }
 
-// GetAllMembers retorna todos os IPs conhecidos do anel consistente
+// GetAllMembers returns all known broker IPs in the consistent ring.
 func (r *SectorRouter) GetAllMembers() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -85,7 +86,7 @@ func (r *SectorRouter) GetAllMembers() []string {
 	return r.ring.Members()
 }
 
-// AddMember adiciona um novo membro ao anel
+// AddMember adds a new broker to the ring.
 func (r *SectorRouter) AddMember(ip string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -94,7 +95,7 @@ func (r *SectorRouter) AddMember(ip string) {
 	log.Printf("[ROUTER] Membro adicionado: %s", ip)
 }
 
-// RemoveMember remove um membro do anel
+// RemoveMember removes a broker from the ring.
 func (r *SectorRouter) RemoveMember(ip string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -104,10 +105,10 @@ func (r *SectorRouter) RemoveMember(ip string) {
 }
 
 // ============================================================
-// Helper Functions (Roteamento e Network)
+// Helper Functions (Routing and Network)
 // ============================================================
 
-// getLocalIP obtém o IP local da máquina (não-loopback)
+// getLocalIP retrieves the local non-loopback IP address.
 func getLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -126,7 +127,7 @@ func getLocalIP() string {
 	return "127.0.0.1"
 }
 
-// isLocalIP verifica se um IP é local (pertence a esta máquina)
+// isLocalIP checks if an IP address belongs to the local machine.
 func isLocalIP(ip string) bool {
 	if ip == "127.0.0.1" || ip == "localhost" {
 		return true
@@ -154,7 +155,7 @@ func isLocalIP(ip string) bool {
 	return false
 }
 
-// forwardPacket encaminha um pacote UDP para outro broker
+// forwardPacket sends a UDP packet to another broker.
 func forwardPacket(targetIP string, payload []byte) {
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:9000", targetIP))
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 	"ormuz-ledger/pkg/queue"
 )
 
-// NewInFlightManager cria o gerenciador e já inicia o Cão de Guarda (Janitor) em background
+// NewInFlightManager creates an in-flight manager and starts the janitor cleanup goroutine.
 func NewInFlightManager(pq *queue.PriorityQueue) *InFlightManager {
 	manager := &InFlightManager{
 		records: make(map[string]InFlightRecord),
@@ -21,7 +21,7 @@ func NewInFlightManager(pq *queue.PriorityQueue) *InFlightManager {
 	return manager
 }
 
-// MarkInFlight registra que uma missão saiu da base e está em execução
+// MarkInFlight records that a mission is now in-flight with a specified duration.
 func (m *InFlightManager) MarkInFlight(mission model.Mission, duration time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -32,7 +32,7 @@ func (m *InFlightManager) MarkInFlight(mission model.Mission, duration time.Dura
 	}
 }
 
-// RenewLease estende o tempo de vida de uma missão (O Drone chama isso enquanto voa)
+// RenewLease extends the mission lease expiration time.
 func (m *InFlightManager) RenewLease(eventID string, duration time.Duration) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -53,7 +53,7 @@ func (m *InFlightManager) RenewLease(eventID string, duration time.Duration) boo
 	return true
 }
 
-// Acknowledge remove a missão permanentemente (O Drone destruiu o alvo)
+// Acknowledge marks a mission as completed and removes it from tracking.
 func (m *InFlightManager) Acknowledge(eventID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -66,7 +66,7 @@ func (m *InFlightManager) Acknowledge(eventID string) bool {
 	return true
 }
 
-// Nack aborta a missão explicitamente (O Drone avisou que falhou)
+// Nack aborts a mission and re-queues it for retry.
 func (m *InFlightManager) Nack(eventID string) bool {
 	m.mu.Lock()
 	record, exists := m.records[eventID]
@@ -87,7 +87,7 @@ func (m *InFlightManager) Nack(eventID string) bool {
 // Watchdog
 // =========================================================
 
-// startJanitor roda a cada 2 segundos varrendo a memória atrás de contratos expirados
+// startJanitor runs periodically to sweep expired lease records.
 func (m *InFlightManager) startJanitor() {
 	ticker := time.NewTicker(2 * time.Second)
 	for range ticker.C {
@@ -95,7 +95,7 @@ func (m *InFlightManager) startJanitor() {
 	}
 }
 
-// sweep faz a varredura e pune os drones que perderam a conexão
+// sweep collects expired missions and re-queues them to the priority queue.
 func (m *InFlightManager) sweep() {
 	m.mu.Lock()
 	var expired []model.Mission

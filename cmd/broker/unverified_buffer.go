@@ -8,23 +8,25 @@ import (
 	"ormuz-ledger/pkg/model"
 )
 
-// UnverifiedRecord guarda a missão e o seu TTL
+// UnverifiedRecord holds a mission and its validation timeout.
 type UnverifiedRecord struct {
 	Mission   model.Mission
 	ExpiresAt time.Time
 }
 
-// UnverifiedBufferManager é a Sala de Espera para missões não validadas
+// UnverifiedBufferManager is a waiting room for unvalidated missions.
 type UnverifiedBufferManager struct {
 	buffer sync.Map
 }
 
+// NewUnverifiedBufferManager creates a buffer manager and starts the cleanup worker.
 func NewUnverifiedBufferManager() *UnverifiedBufferManager {
 	bm := &UnverifiedBufferManager{}
 	go bm.startJanitor()
 	return bm
 }
 
+// Store adds a mission to the waiting room with a validation timeout.
 func (bm *UnverifiedBufferManager) Store(mission model.Mission) {
 	// Guarda a missão com um timeout de 10 segundos para a validação do Ledger
 	record := UnverifiedRecord{
@@ -34,6 +36,7 @@ func (bm *UnverifiedBufferManager) Store(mission model.Mission) {
 	bm.buffer.Store(mission.Payload.EventID, record)
 }
 
+// RetrieveAndRemove gets and removes a mission from the buffer.
 func (bm *UnverifiedBufferManager) RetrieveAndRemove(eventID string) (model.Mission, bool) {
 	if val, ok := bm.buffer.LoadAndDelete(eventID); ok {
 		record := val.(UnverifiedRecord)
@@ -42,7 +45,7 @@ func (bm *UnverifiedBufferManager) RetrieveAndRemove(eventID string) (model.Miss
 	return model.Mission{}, false
 }
 
-// startJanitor limpa a memória de missões que nunca receberam resposta do Primário
+// startJanitor removes expired missions that never received validation.
 func (bm *UnverifiedBufferManager) startJanitor() {
 	ticker := time.NewTicker(5 * time.Second)
 	for range ticker.C {

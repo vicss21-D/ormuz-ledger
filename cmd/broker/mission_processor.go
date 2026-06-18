@@ -14,6 +14,7 @@ import (
 	"ormuz-ledger/pkg/queue"
 )
 
+// MissionProcessor handles incoming telemetry and mission routing.
 type MissionProcessor struct {
 	Queue        *queue.PriorityQueue
 	ShadowBuffer *ShadowBufferManager
@@ -23,6 +24,7 @@ type MissionProcessor struct {
 	Router       *SectorRouter
 }
 
+// process validates and routes a single mission to its appropriate broker or queue.
 func (p *MissionProcessor) process(rawBytes []byte, workerID int) {
 	var data model.SensorData
 	if err := json.Unmarshal(rawBytes, &data); err != nil {
@@ -78,7 +80,7 @@ func (p *MissionProcessor) process(rawBytes []byte, workerID int) {
 	}
 }
 
-// broadcastValidationSync faz o Gossip reverso aos brokers irmãos
+// broadcastValidationSync sends validation results to other broker instances.
 func (p *MissionProcessor) broadcastValidationSync(action string, mission model.Mission) {
 	ips := p.Router.GetAllMembers() // Retorna todos os IPs do anel
 	myIP := getLocalIP()
@@ -104,7 +106,7 @@ func (p *MissionProcessor) broadcastValidationSync(action string, mission model.
 	}
 }
 
-// StartWorkers inicia N goroutines para processar pacotes UDP
+// StartWorkers starts N goroutines to process UDP packets.
 func (p *MissionProcessor) StartWorkers(numWorkers int, packetsChan <-chan []byte) {
 	for i := 0; i < numWorkers; i++ {
 		go func(workerID int) {

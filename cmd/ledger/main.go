@@ -12,6 +12,7 @@ import (
 	abciserver "github.com/cometbft/cometbft/abci/server"
 )
 
+// main initializes and runs the blockchain state machine server.
 func main() {
 	addr := flag.String("addr", "tcp://0.0.0.0:26658", "Endereço do socket ABCI")
 	flag.Parse()

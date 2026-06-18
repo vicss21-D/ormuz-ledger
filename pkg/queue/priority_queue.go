@@ -2,26 +2,30 @@ package queue
 
 import (
 	"container/heap"
+	"log"
 	"sync"
 	"time"
-	"log"
 
 	"ormuz-ledger/pkg/clock"
 	"ormuz-ledger/pkg/model"
 )
 
-// --- ESTRUTURA INTERNA DA HEAP ---
+// --- INTERNAL HEAP STRUCTURE ---
 
+// missionHeap implements a min-max heap ordering missions by criticality and Lamport clock.
 type missionHeap []model.Mission
 
-func (h missionHeap) Len() int      { return len(h) }
+// Len returns the number of missions in the heap.
+func (h missionHeap) Len() int { return len(h) }
+
+// Swap exchanges two missions in the heap.
 func (h missionHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 
-// Less implementa a Ordenação Total Matemática
+// Less defines the total ordering: critical first, then by Lamport clock, then by sensor ID.
 func (h missionHeap) Less(i, j int) bool {
 	// 1. Criticidade Absoluta (Max-Heap: true sobe, false desce)
 	if h[i].Payload.IsCritical != h[j].Payload.IsCritical {
-		return h[i].Payload.IsCritical 
+		return h[i].Payload.IsCritical
 	}
 
 	// 2. Causalidade de Lamport (Min-Heap temporal: menor tempo sai primeiro)
@@ -33,10 +37,12 @@ func (h missionHeap) Less(i, j int) bool {
 	return h[i].Payload.SensorID < h[j].Payload.SensorID
 }
 
+// Push appends a mission to the heap.
 func (h *missionHeap) Push(x interface{}) {
 	*h = append(*h, x.(model.Mission))
 }
 
+// Pop removes and returns the mission with highest priority from the heap.
 func (h *missionHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
@@ -45,8 +51,9 @@ func (h *missionHeap) Pop() interface{} {
 	return item
 }
 
-// --- GERENCIADOR DA FILA (THREAD-SAFE + AGING) ---
+// --- PRIORITY QUEUE MANAGER (THREAD-SAFE + AGING) ---
 
+// PriorityQueue manages mission scheduling with priority enforcement and starvation prevention.
 type PriorityQueue struct {
 	mh         *missionHeap
 	mu         sync.Mutex
@@ -54,7 +61,7 @@ type PriorityQueue struct {
 	agingLimit uint64 // Limite de Lamport Ticks antes de promover um pacote
 }
 
-// New cria a fila e liga o motor Anti-Starvation
+// New creates a priority queue and starts the anti-starvation worker.
 func New(agingLimit uint64) *PriorityQueue {
 	pq := &PriorityQueue{
 		mh:         &missionHeap{},
@@ -67,17 +74,15 @@ func New(agingLimit uint64) *PriorityQueue {
 	return pq
 }
 
-// Enqueue enfileira uma nova missão logaritmicamente O(log N)
+// Enqueue adds a mission to the queue in O(log N) time.
 func (pq *PriorityQueue) Enqueue(m model.Mission) {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
-	
+
 	heap.Push(pq.mh, m)
 }
 
-// Dequeue tenta retirar a missão de maior prioridade da Heap.
-// Retorna a missão e 'true' se houver sucesso.
-// Se a fila estiver vazia, retorna 'false' imediatamente (Não-bloqueante).
+// Dequeue removes and returns the highest priority mission. Returns false if queue is empty.
 func (pq *PriorityQueue) Dequeue() (model.Mission, bool) {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
@@ -91,11 +96,11 @@ func (pq *PriorityQueue) Dequeue() (model.Mission, bool) {
 	return mission, true
 }
 
-// antiStarvationWorker promove missões antigas (Aging)
+// antiStarvationWorker periodically promotes aged non-critical missions to prevent starvation.
 func (pq *PriorityQueue) antiStarvationWorker() {
 	for {
 		time.Sleep(1 * time.Second) // Frequência da varredura
-		
+
 		pq.mu.Lock()
 		if pq.mh.Len() == 0 {
 			pq.mu.Unlock()
@@ -125,14 +130,14 @@ func (pq *PriorityQueue) antiStarvationWorker() {
 	}
 }
 
-	// PrintAllMissions exibe no terminal o estado atual do campo de batalha aguardando despacho
+// PrintAllMissions logs the current queue state to stdout.
 func (mq *PriorityQueue) PrintAllMissions() {
 	// 1. Congela a fila para impedir que o Radar insira itens enquanto lemos
 	mq.mu.Lock()
 	defer mq.mu.Unlock()
 
 	// Substitua 'mq.items' pelo nome do slice/array real da sua struct
-	total := len(*mq.mh) 
+	total := len(*mq.mh)
 
 	if total == 0 {
 		log.Println("🛡️ [HEAP] A fila de missões está vazia. Setor limpo.")
@@ -140,21 +145,21 @@ func (mq *PriorityQueue) PrintAllMissions() {
 	}
 
 	log.Printf("📊 [HEAP] === RAIO-X DO CAMPO DE BATALHA (%d Alvos Pendentes) ===", total)
-	
+
 	for i, mission := range *mq.mh {
 		// Ajuste os campos (EventID, ThreatLevel) conforme o seu modelo Mission
 		eventID := mission.Payload.EventID
 		if len(eventID) > 8 {
 			eventID = eventID[:8]
 		}
-		
-		log.Printf("  -> [%d] Alvo: %s | Nível de Ameaça: %t | Setor: %s", 
-			i, 
-			eventID, 
-			mission.Payload.IsCritical, 
+
+		log.Printf("  -> [%d] Alvo: %s | Nível de Ameaça: %t | Setor: %s",
+			i,
+			eventID,
+			mission.Payload.IsCritical,
 			mission.Payload.SensorID,
 		)
 	}
 
-		log.Println("==================================================================")
+	log.Println("==================================================================")
 }

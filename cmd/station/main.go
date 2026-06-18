@@ -11,11 +11,15 @@ import (
 	"ormuz-ledger/pkg/server"
 )
 
+// getEnv retrieves an environment variable or returns a fallback value.
 func getEnv(key, fallback string) string {
-	if val, ok := os.LookupEnv(key); ok { return val }
+	if val, ok := os.LookupEnv(key); ok {
+		return val
+	}
 	return fallback
 }
 
+// main initializes and runs the station command and control server.
 func main() {
 	port := getEnv("PORT", "8081")
 	brokerURL := getEnv("BROKER_URL", "http://tasks.broker:8080") // Resolve via DNS Swarm
@@ -35,7 +39,7 @@ func main() {
 			mission, found := dummyQueue.Dequeue()
 			if found {
 				log.Printf("⚠️ [C2-JANITOR] Conexão perdida com o Drone (Timeout)! Devolvendo Missão %s ao Broker...", mission.Payload.EventID[:8])
-				
+
 				resolveURL := brokerURL + "/queue/resolve"
 				payload := map[string]interface{}{
 					"action":  "REQUEUE",
@@ -49,7 +53,7 @@ func main() {
 
 	// 3. Inicia o Servidor de Comando
 	stationServer := NewStationServer(brokerURL, flightRadar)
-	
+
 	log.Printf("📡 Estação de Comando (C2) online na porta %s. A aguardar Drones...", port)
 	if err := http.ListenAndServe(":"+port, stationServer.SetupRouter()); err != nil {
 		log.Fatalf("[FATAL] Falha na Estação: %v", err)

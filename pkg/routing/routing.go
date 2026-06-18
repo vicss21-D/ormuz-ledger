@@ -4,6 +4,7 @@ import (
 	"math"
 )
 
+// CalculateStationPosition computes the perimeter position for a station in the grid.
 func CalculateStationPosition(slot, totalStations, maxSensors int) Coordinate {
 	largura := math.Ceil(math.Sqrt(float64(maxSensors)))
 	altura := math.Ceil(float64(maxSensors) / largura)
@@ -39,7 +40,7 @@ func CalculateStationPosition(slot, totalStations, maxSensors int) Coordinate {
 	return Coordinate{X: x, Y: y}
 }
 
-// CalculateSensorPosition converte o ID de um setor/sensor em uma coordenada X,Y no grid de batalha
+// CalculateSensorPosition converts a sector ID to 2D Cartesian coordinates in the grid.
 func CalculateSensorPosition(sectorID int, maxSensors int) Coordinate {
 	// Proteção contra IDs nulos
 	if sectorID <= 0 {

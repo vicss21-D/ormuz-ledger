@@ -5,22 +5,22 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 	"sync"
+	"time"
 
+	cache "ormuz-ledger/internal/inventory"
+	"ormuz-ledger/pkg/model"
 	"ormuz-ledger/pkg/queue"
 	"ormuz-ledger/pkg/server"
-	"ormuz-ledger/internal/inventory"
-	"ormuz-ledger/pkg/model"
 )
 
-// PendingMission guarda a missão que foi entregue a uma Estação e o momento exato do checkout
+// PendingMission tracks a mission awaiting station response with checkout time.
 type PendingMission struct {
 	Mission      model.Mission
 	CheckoutTime time.Time
 }
 
-// HTTPServer gerencia a API HTTP do Broker para C2 e Drones
+// HTTPServer manages the broker's HTTP API for command and control.
 type HTTPServer struct {
 	Queue        *queue.PriorityQueue
 	ShadowBuffer *ShadowBufferManager
@@ -33,7 +33,7 @@ type HTTPServer struct {
 	pendingMissions map[string]PendingMission
 }
 
-// NewHTTPServer cria uma nova instância do servidor HTTP
+// NewHTTPServer creates an HTTP server instance and starts the pending mission janitor.
 func NewHTTPServer(mq *queue.PriorityQueue, sb *ShadowBufferManager, ub *UnverifiedBufferManager, lc *LedgerClient, filter *cache.IdempotencyFilter) *HTTPServer {
 	server := &HTTPServer{
 		Queue:        mq,
@@ -50,7 +50,7 @@ func NewHTTPServer(mq *queue.PriorityQueue, sb *ShadowBufferManager, ub *Unverif
 	return server
 }
 
-// SetupRouter configura todas as rotas HTTP do servidor
+// SetupRouter configures all HTTP routes for the broker.
 func (hs *HTTPServer) SetupRouter() *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -74,7 +74,7 @@ func (hs *HTTPServer) SetupRouter() *http.ServeMux {
 
 // ========== HEALTH CHECK ==========
 
-// healthCheck respondeu o status de saúde do broker
+// healthCheck responds with the broker's health status.
 func (hs *HTTPServer) healthCheck(w http.ResponseWriter, r *http.Request) {
 	resp := server.HealthCheckResponse{
 		Status:    "ok",
@@ -88,7 +88,7 @@ func (hs *HTTPServer) healthCheck(w http.ResponseWriter, r *http.Request) {
 
 // ========== STATION MANAGEMENT ==========
 
-// startPendingJanitor varre o mapa de pendências e devolve à fila missões esquecidas
+// startPendingJanitor periodically returns forgotten missions to the queue.
 func (s *HTTPServer) startPendingJanitor() {
 	ticker := time.NewTicker(5 * time.Second)
 	for range ticker.C {
@@ -108,6 +108,7 @@ func (s *HTTPServer) startPendingJanitor() {
 	}
 }
 
+// HandleQueuePop removes and returns the highest priority mission from the queue.
 func (s *HTTPServer) HandleQueuePop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -136,7 +137,7 @@ func (s *HTTPServer) HandleQueuePop(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(mission)
 }
 
-// HandleQueueResolve: A Estação devolve o resultado (Falha de comunicação do Drone ou Sucesso absoluto)
+// HandleQueueResolve processes mission completion or requeue from the station.
 func (s *HTTPServer) HandleQueueResolve(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -183,7 +184,7 @@ func (s *HTTPServer) HandleQueueResolve(w http.ResponseWriter, r *http.Request) 
 
 // ========== INTERNAL BROKER API (GOSSIP) ==========
 
-// shadowSync sincroniza as decisões de validação entre brokers
+// HandleShadowSync synchronizes validation decisions between broker instances.
 func (s *HTTPServer) HandleShadowSync(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -230,7 +231,7 @@ func (s *HTTPServer) HandleShadowSync(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// topologySync sincroniza mudanças na topologia de brokers
+// topologySync synchronizes broker topology changes.
 func (hs *HTTPServer) topologySync(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -254,7 +255,7 @@ func (hs *HTTPServer) topologySync(w http.ResponseWriter, r *http.Request) {
 
 // ========== EXPLORER ==========
 
-// handleExplorer expõe o estado global do Ledger para entidades externas (C2, Analistas, etc)
+// handleExplorer exposes the global ledger state to external entities.
 func (s *HTTPServer) handleExplorer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)

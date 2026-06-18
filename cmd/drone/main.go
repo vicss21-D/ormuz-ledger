@@ -13,6 +13,7 @@ import (
 	"ormuz-ledger/pkg/server"
 )
 
+// LedgerTransaction represents a transaction to be recorded on the blockchain.
 type LedgerTransaction struct {
 	Type      string `json:"type"`
 	NationID  string `json:"nation_id"`
@@ -21,6 +22,7 @@ type LedgerTransaction struct {
 	Payload   string `json:"payload"`
 }
 
+// Drone is an autonomous unmanned aerial vehicle.
 type Drone struct {
 	ID               string
 	DiscoveryURL     string // O DNS nativo do Swarm (tasks.station)
@@ -30,6 +32,7 @@ type Drone struct {
 	IsRegistered     bool
 }
 
+// main initializes and runs the autonomous drone agent.
 func main() {
 	droneID := os.Getenv("DRONE_ID")
 	if droneID == "" {
@@ -75,21 +78,22 @@ func main() {
 			drone.saveReportToLedger(mission, flightTime)
 		} else {
 			log.Printf("⚠️ [%s] ABORTAR MISSÃO! Ligação C2 perdida. A reconfigurar...", drone.ID)
-			drone.IsRegistered = false 
+			drone.IsRegistered = false
 			drone.ActiveStationURL = "" // Limpa a sessão morta
 			time.Sleep(3 * time.Second)
 		}
 	}
 }
 
+// register connects the drone to the station.
 func (d *Drone) register() {
 	url := fmt.Sprintf("%s/api/drone/register", d.DiscoveryURL)
 	payload := map[string]string{"drone_id": d.ID}
-	
+
 	var response struct {
 		DirectURL string `json:"direct_url"`
 	}
-	
+
 	err := d.HTTPClient.PostJSON(url, payload, &response)
 	if err == nil && response.DirectURL != "" {
 		d.ActiveStationURL = response.DirectURL
@@ -100,10 +104,11 @@ func (d *Drone) register() {
 	}
 }
 
+// pullMission retrieves the next mission from the station.
 func (d *Drone) pullMission() (model.Mission, bool) {
 	var mission model.Mission
 	url := fmt.Sprintf("%s/api/mission/pull?drone_id=%s", d.ActiveStationURL, d.ID)
-	
+
 	err := d.HTTPClient.GetJSON(url, &mission)
 	if err != nil || mission.Payload.EventID == "" {
 		return mission, false
@@ -111,6 +116,7 @@ func (d *Drone) pullMission() (model.Mission, bool) {
 	return mission, true
 }
 
+// executeMission flies to target and maintains heartbeat lease renewal.
 func (d *Drone) executeMission(mission model.Mission) (bool, time.Duration) {
 	eventID := mission.Payload.EventID
 	log.Printf("🚁 [%s] Em rota para o Alvo: %s (Setor %d)", d.ID, eventID[:8], mission.Payload.SectorID)
@@ -154,12 +160,14 @@ func (d *Drone) executeMission(mission model.Mission) (bool, time.Duration) {
 	}
 }
 
+// sendAck confirms mission completion to the station.
 func (d *Drone) sendAck(eventID string) {
 	url := fmt.Sprintf("%s/api/mission/ack", d.ActiveStationURL)
 	payload := map[string]string{"event_id": eventID, "drone_id": d.ID}
 	_ = d.HTTPClient.PostJSON(url, payload, nil)
 }
 
+// saveReportToLedger records mission completion on the blockchain.
 func (d *Drone) saveReportToLedger(mission model.Mission, flightTime time.Duration) {
 	reportData := map[string]interface{}{
 		"drone_id":    d.ID,
@@ -179,12 +187,12 @@ func (d *Drone) saveReportToLedger(mission model.Mission, flightTime time.Durati
 		Payload:   string(reportBytes),
 	}
 	txBytes, _ := json.Marshal(tx)
-	
+
 	rpcPayload := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "broadcast_tx_sync",
-		"params": map[string]string{"tx": base64.StdEncoding.EncodeToString(txBytes)},
+		"params":  map[string]string{"tx": base64.StdEncoding.EncodeToString(txBytes)},
 	}
 
 	err := d.HTTPClient.PostJSON(d.CometURL, rpcPayload, nil)
