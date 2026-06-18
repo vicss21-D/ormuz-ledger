@@ -102,18 +102,46 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 			continue
 		}
 
-		// 1. PREVENÇÃO DE DUPLICAÇÃO DESACOPLADA
-		// A chave agora inclui o Tipo. Ex: processed:SPEND_CREDIT_68124a7c... e processed:SAVE_REPORT_68124a7c...
+		// =======================================================
+		// 1. BARREIRA CRIPTOGRÁFICA: VERIFICAÇÃO DE IDENTIDADE
+		// =======================================================
+		pubKeyHex, exists := AuthorizedKeys[tx.NationID]
+		if !exists {
+			log.Printf("🚨 Nação desconhecida ou não autorizada: %s", tx.NationID)
+			txResults = append(txResults, &types.ExecTxResult{Code: 2, Log: "Nação não autorizada"})
+			continue
+		}
+
+		pubKeyBytes, errKey := hex.DecodeString(pubKeyHex)
+		sigBytes, errSig := hex.DecodeString(tx.Signature)
+
+		if errKey != nil || errSig != nil || len(sigBytes) != ed25519.SignatureSize {
+			log.Printf("🚨 Formato de assinatura inválido da Nação %s", tx.NationID)
+			txResults = append(txResults, &types.ExecTxResult{Code: 3, Log: "Assinatura corrompida"})
+			continue
+		}
+
+		// Remonta a mensagem exata que a Estação/Broker deve ter assinado
+		messageToVerify := []byte(tx.Type + tx.NationID + tx.EventID)
+
+		if !ed25519.Verify(pubKeyBytes, messageToVerify, sigBytes) {
+			log.Printf("🚨 ASSINATURA INVÁLIDA! Tentativa de intrusão detetada. Evento: %s", tx.EventID[:8])
+			txResults = append(txResults, &types.ExecTxResult{Code: 4, Log: "Falsificação criptográfica"})
+			continue
+		}
+		// =======================================================
+
+		// 2. PREVENÇÃO DE DUPLICAÇÃO DESACOPLADA
 		processedKey := []byte(fmt.Sprintf("processed:%s_%s", tx.Type, tx.EventID))
 		hasBeenProcessed, _ := app.db.Has(processedKey, nil)
 
 		if hasBeenProcessed {
 			log.Printf("Operação Duplicada rejeitada! Tipo: %s | Evento: %s", tx.Type, tx.EventID[:8])
-			txResults = append(txResults, &types.ExecTxResult{Code: 4, Log: "Transação já processada"})
+			txResults = append(txResults, &types.ExecTxResult{Code: 5, Log: "Transação já processada"})
 			continue
 		}
 
-		// 2. MÁQUINA DE ESTADOS (Responsabilidade Única)
+		// 3. MÁQUINA DE ESTADOS (Responsabilidade Única)
 		switch tx.Type {
 		case "SPEND_CREDIT":
 			// Apenas altera o saldo
@@ -130,7 +158,7 @@ func (app *OrmuzLedgerApp) FinalizeBlock(ctx context.Context, req *types.Finaliz
 			log.Printf("[LEDGER] Relatório físico validado. (Evento: %s)", tx.EventID[:8])
 		}
 
-		// 3. APLICA A TRAVA ESPECÍFICA E GRAVA NO EXPLORER
+		// 4. APLICA A TRAVA ESPECÍFICA E GRAVA NO EXPLORER
 		app.db.Put(processedKey, []byte("true"), nil)
 
 		// Usamos o tx.Type no nome da chave para que o Débito e o Relatório coexistam pacificamente no Explorer
