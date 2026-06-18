@@ -1,5 +1,7 @@
 .env
 
+deployments/config/*/config/addrbook.json
+
 # Ignorar as bases de dados da aplicação Go (LevelDB)
 deployments/data/*
 !deployments/data/.gitkeep
