@@ -10,3 +10,7 @@ deployments/data/*
 deployments/config/*/data/*.db
 deployments/config/*/data/*.wal
 deployments/config/*/data/*.log
+
+notes
+
+docs
