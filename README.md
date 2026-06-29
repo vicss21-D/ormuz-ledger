@@ -8,7 +8,7 @@ O **Ormuz Ledger** é uma infraestrutura de Comando e Controle baseada em blockc
 
 ## Arquitetura
 
-![Arquitetura](docs/arch.png)
+<img width="1920" height="1080" alt="Sensor" src="https://github.com/user-attachments/assets/7063c21c-7ea7-43e1-b577-d463de2cb924" />
 
 O Ormuz Ledger opera através de uma topologia de rede distribuída onde microsserviços interagem de forma assíncrona com uma malha de consenso BFT (*Byzantine Fault Tolerance*). A comunicação entre as camadas é estritamente dividida entre operações físicas e o registo imutável de estado (Blockchain).
 
