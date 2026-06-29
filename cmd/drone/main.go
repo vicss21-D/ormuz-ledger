@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"encoding/hex"
+	"crypto/ed25519"
 	"fmt"
 	"log"
 	"math/rand"
@@ -183,7 +185,7 @@ func (d *Drone) saveReportToLedger(mission model.Mission, flightTime time.Durati
 		Type:      "SAVE_REPORT",
 		NationID:  mission.Payload.NationID,
 		EventID:   mission.Payload.EventID,
-		Signature: fmt.Sprintf("SIG-%s", d.ID),
+		Signature: SignTransaction(mission.Payload.NationID, "SAVE_REPORT", mission.Payload.EventID),
 		Payload:   string(reportBytes),
 	}
 	txBytes, _ := json.Marshal(tx)
@@ -201,4 +203,13 @@ func (d *Drone) saveReportToLedger(mission model.Mission, flightTime time.Durati
 		return
 	}
 	log.Printf("✅ [%s] Alvo %s Neutralizado e Auditado no Ledger.", d.ID, mission.Payload.EventID[:8])
+}
+
+func SignTransaction(nationID, txType, eventID string) string {
+	seedString := fmt.Sprintf("%-32s", nationID+"-SECRET-SEED-ORMUZ-2026")
+	seed := []byte(seedString)[:32]
+	privKey := ed25519.NewKeyFromSeed(seed)
+	message := []byte(txType + nationID + eventID)
+	signatureBytes := ed25519.Sign(privKey, message)
+	return hex.EncodeToString(signatureBytes)
 }
